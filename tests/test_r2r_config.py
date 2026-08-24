@@ -41,6 +41,16 @@ class R2RConfigTest(unittest.TestCase):
     self.assertTrue(cache['enabled'])
     self.assertEqual(cache['storage_dtype'], 'bfloat16')
 
+  def test_toy_distance_presets_use_exact_episode_geometry(self):
+    expected = {
+        'toy_distance8': 'toymemory_10',
+        'toy_distance16': 'toymemory_18',
+        'toy_distance32': 'toymemory_34',
+        'toy_distance64': 'toymemory_66',
+    }
+    for preset, task in expected.items():
+      self.assertEqual(self.config[preset], {'task': task})
+
 
 if __name__ == '__main__':
   unittest.main()

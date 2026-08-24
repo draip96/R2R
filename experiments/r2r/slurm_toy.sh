@@ -17,13 +17,30 @@ R2R_ROOT=/project/6101829/draip/R2R
 R2R_IMAGE=${R2R_IMAGE:-${R2R_ROOT}/.containers/r2i.sif}
 RESULT_ROOT=${R2R_RESULT_ROOT:-${R2R_ROOT}/experiments/r2r/results}
 CAMPAIGN=${R2R_CAMPAIGN:?R2R_CAMPAIGN is required}
-HORIZON=${R2R_TOY_HORIZON:?R2R_TOY_HORIZON is required}
-if [[ "${HORIZON}" != 128 && "${HORIZON}" != 256 ]]; then
-  echo "toy horizon must be 128 or 256" >&2
-  exit 2
+if [[ -n "${R2R_TOY_DISTANCE:-}" ]]; then
+  DISTANCE=${R2R_TOY_DISTANCE}
+  case "${DISTANCE}" in
+    8|16|32|64) ;;
+    *)
+      echo "toy cue/query distance must be one of 8, 16, 32, or 64" >&2
+      exit 2
+      ;;
+  esac
+  TOY_CONFIG=toy_distance${DISTANCE}
+  TOY_LABEL=distance${DISTANCE}
+  TOY_DESCRIPTION="cue/query distance ${DISTANCE}"
+else
+  HORIZON=${R2R_TOY_HORIZON:?R2R_TOY_HORIZON or R2R_TOY_DISTANCE is required}
+  if [[ "${HORIZON}" != 128 && "${HORIZON}" != 256 ]]; then
+    echo "toy horizon must be 128 or 256" >&2
+    exit 2
+  fi
+  TOY_CONFIG=toy_memory${HORIZON}
+  TOY_LABEL=horizon${HORIZON}
+  TOY_DESCRIPTION="horizon ${HORIZON}"
 fi
-OUTPUT=${RESULT_ROOT}/toy/${CAMPAIGN}/horizon${HORIZON}
-REPLAY_DIRECTORY=${SLURM_TMPDIR:?}/r2r-toy-${CAMPAIGN}-${HORIZON}
+OUTPUT=${RESULT_ROOT}/toy/${CAMPAIGN}/${TOY_LABEL}
+REPLAY_DIRECTORY=${SLURM_TMPDIR:?}/r2r-toy-${CAMPAIGN}-${TOY_LABEL}
 mkdir -p "${OUTPUT}/provenance" "${OUTPUT}/lfs"
 R2R_ROOT=${R2R_ROOT} "${R2R_ROOT}/experiments/r2r/record_provenance.sh" \
   "${OUTPUT}/provenance"
@@ -48,13 +65,13 @@ apptainer exec --cleanenv --nv \
   --pwd "${R2R_ROOT}" \
   "${R2R_IMAGE}" \
   python recall2imagine/train.py \
-    --configs "toy_memory,toy_memory${HORIZON},r2r_w64" \
+    --configs "toy_memory,${TOY_CONFIG},r2r_w64" \
     --seed 0 \
     --logdir "${OUTPUT}" \
     --replay_dir "${REPLAY_DIRECTORY}" \
     --lfs_dir "${OUTPUT}/lfs" \
     --use_lfs True \
-    --wdb_name "R2R-toy-${HORIZON}" &
+    --wdb_name "R2R-toy-${TOY_LABEL}" &
 child=$!
 wait "${child}"
 status=$?
@@ -67,6 +84,6 @@ if [[ ${status} -ne 0 ]]; then
   exit ${status}
 fi
 if [[ ! -f "${OUTPUT}/SUCCESS" ]]; then
-  echo "ToyMemory horizon ${HORIZON} missed the strict gate" >&2
+  echo "ToyMemory ${TOY_DESCRIPTION} missed the strict gate" >&2
   exit 3
 fi

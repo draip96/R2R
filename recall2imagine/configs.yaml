@@ -315,6 +315,20 @@ toy_memory128:
 toy_memory256:
   task: toymemory_256
 
+# Literal cue-to-query distances. ToyMemory places the cue at row 0 and the
+# query at episode_steps - 2, so each task needs two additional replay rows.
+toy_distance8:
+  task: toymemory_10
+
+toy_distance16:
+  task: toymemory_18
+
+toy_distance32:
+  task: toymemory_34
+
+toy_distance64:
+  task: toymemory_66
+
 tiny:
   rssm.deter: 200
   .*\.cnn_depth: 32

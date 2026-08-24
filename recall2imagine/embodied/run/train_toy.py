@@ -72,6 +72,8 @@ def _balanced_evaluation(agent, env, episodes):
 def train_toy(agent, env, eval_env, replay, logger, args, config):
   logdir = embodied.Path(args.logdir)
   logdir.mkdirs()
+  episode_steps = int(config.task.split('_', 1)[1])
+  cue_query_distance = episode_steps - 2
   should_expl = embodied.when.Until(args.expl_until)
   should_train = embodied.when.Ratio(args.train_ratio / args.batch_steps)
   should_log = embodied.when.Clock(args.log_every)
@@ -191,6 +193,8 @@ def train_toy(agent, env, eval_env, replay, logger, args, config):
       summary = {
           'protocol': 'r2r-toy-memory-v1',
           'task': config.task,
+          'episode_steps': episode_steps,
+          'cue_query_distance': cue_query_distance,
           'window': int(config.batch_length),
           'batch_size': int(config.batch_size),
           'environment_steps': int(step),
@@ -215,6 +219,8 @@ def train_toy(agent, env, eval_env, replay, logger, args, config):
   summary = {
       'protocol': 'r2r-toy-memory-v1',
       'task': config.task,
+      'episode_steps': episode_steps,
+      'cue_query_distance': cue_query_distance,
       'window': int(config.batch_length),
       'batch_size': int(config.batch_size),
       'environment_steps': int(step),

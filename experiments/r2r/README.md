@@ -44,6 +44,22 @@ uniform replay, 4096 random-prefill transitions, train ratio 1024, and balanced
 exactly 100% actor accuracy and exactly 100% model reward-choice accuracy before
 25,000 steps.
 
+## Cue/query distance diagnostic
+
+Submit independent seed-0 jobs at literal cue-to-query distances 8, 16, 32,
+and 64:
+
+```bash
+experiments/r2r/submit_toy_distances.sh
+```
+
+All four jobs use window 64, batch 64, the production uniform replay and BF16
+state-adjoint cache, 4096 random-prefill transitions, train ratio 1024, and the
+same balanced 128-episode evaluation and strict early-stop gate as the staged
+ToyMemory runs. ToyMemory's terminal transition follows the query, so these
+distances correspond to episode sizes 10, 18, 34, and 66 respectively. The
+first three dependencies fit inside the learner window; distance 64 does not.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:
