@@ -61,7 +61,7 @@ class Agent(nj.Module):
     expl_outs, expl_state = self.expl_behavior.policy(latent, expl_state)
     if mode == 'eval':
       outs = task_outs
-      outs['action'] = outs['action'].sample(seed=nj.rng())
+      outs['action'] = outs['action'].mode()
       outs['log_entropy'] = jnp.zeros(outs['action'].shape[:1])
     elif mode == 'explore':
       outs = expl_outs
@@ -74,20 +74,42 @@ class Agent(nj.Module):
     state = ((latent, outs['action']), task_state, expl_state)
     return outs, state
 
+  def model_reward_choice(self, state):
+    """Choose the action whose one-step branch has larger predicted reward."""
+    (latent, _), _, _ = state
+    values = []
+    for index in range(self.act_space.shape[0]):
+      action = jax.nn.one_hot(
+          jnp.full((len(latent['stoch']),), index, jnp.int32),
+          self.act_space.shape[0])
+      successor = self.wm.rssm.img_step(latent, action)
+      values.append(self.wm.heads['reward'](successor).mean())
+    values = jnp.stack(values, axis=-1)
+    return jnp.argmax(values, axis=-1), values
+
+  def actor_from_state(self, state):
+    (latent, _), task_state, _ = state
+    outputs, _ = self.task_behavior.policy(latent, task_state)
+    return outputs['action'].mode()
+
   def train(self, data, state):
     self.config.jax.jit and print('Tracing train function.')
     metrics = {}
     data = self.preprocess(data)
     state, wm_outs, mets = self.wm.train(data, state)
     metrics.update(mets)
-    context = {**data, **wm_outs['post']}
+    context = {
+        **{k: v for k, v in data.items() if not k.startswith('_r2r_')},
+        **wm_outs['post']}
     start = tree_map(lambda x: x.reshape([-1] + list(x.shape[2:])), context)
     _, mets = self.task_behavior.train(self.wm.imagine, start, context)
     metrics.update(mets)
     if self.config.expl_behavior != 'None':
       _, mets = self.expl_behavior.train(self.wm.imagine, start, context)
       metrics.update({'expl_' + key: value for key, value in mets.items()})
-    outs = {}
+    outs = {
+        key: value for key, value in wm_outs.items()
+        if key.startswith('_r2r_')}
     return outs, state, metrics
 
   def report(self, data):
@@ -105,7 +127,7 @@ class Agent(nj.Module):
   def preprocess(self, obs):
     obs = obs.copy()
     for key, value in obs.items():
-      if key.startswith('log_') or key in ('key',):
+      if key.startswith('log_') or key.startswith('_r2r_') or key in ('key',):
         continue
       if len(value.shape) > 3 and value.dtype == jnp.uint8:
         value = jaxutils.cast_to_compute(value) / 255.0
@@ -159,18 +181,44 @@ class WorldModel(nj.Module):
 
   def train(self, data, state):
     modules = [self.encoder, self.rssm, *self.heads.values()]
+    if self.config.state_gradient_cache.enabled:
+      state = self._cached_initial(data)
+      taps = jnp.zeros(
+          (data['is_first'].shape[0], data['is_first'].shape[1],
+           self.config.ssm.n_layers, self.config.rssm.hidden),
+          dtype=jnp.complex64)
+      future = (
+          data['_r2r_future_adjoint_real'] +
+          1j * data['_r2r_future_adjoint_imag']).astype(jnp.complex64)
+      future_valid = (
+          data['_r2r_future_adjoint_valid'].astype(bool) &
+          ~data['is_last'][:, -1].astype(bool))
+      future = jnp.where(
+          future_valid[:, None, None], future, jnp.zeros_like(future))
+      mets, (state, outs, metrics), input_grads = self.opt(
+          modules, self.loss, data, state, taps, future,
+          has_aux=True, input_grad_argnums=(2,))
+      tap_grads, = input_grads
+      outs.update(self._cache_updates(data, outs['post'], tap_grads))
+      metrics['cache_initial_hit_rate'] = (
+          data['_r2r_initial_valid'].astype(jnp.float32).mean())
+      metrics['cache_future_hit_rate'] = (
+          data['_r2r_future_adjoint_valid'].astype(jnp.float32).mean())
+      metrics.update(mets)
+      return state, outs, metrics
     mets, (state, outs, metrics) = self.opt(
         modules, self.loss, data, state, has_aux=True)
     metrics.update(mets)
     return state, outs, metrics
 
-  def loss(self, data, state):
+  def loss(self, data, state, state_taps=None, future_adjoint=None):
     embed = self.encoder(data)
     prev_latent, prev_action = state
     prev_actions = jnp.concatenate([
         prev_action[:, None], data['action'][:, :-1]], 1)
     post, prior = self.rssm.observe(
-        embed, prev_actions, data['is_first'], prev_latent)
+        embed, prev_actions, data['is_first'], prev_latent,
+        state_taps=state_taps)
     dists = {}
     feats = {**post, 'embed': embed}
     for name, head in self.heads.items():
@@ -192,7 +240,73 @@ class WorldModel(nj.Module):
     last_action = data['action'][:, -1]
     state = last_latent, last_action
     metrics = self._metrics(data, dists, post, prior, losses, model_loss)
-    return model_loss.mean(), (state, out, metrics)
+    loss = model_loss.mean()
+    if future_adjoint is not None:
+      # JAX's complex cotangent convention is paired with the non-conjugated
+      # real inner product. A focused oracle test freezes this convention.
+      surrogate = jnp.real(jnp.sum(future_adjoint * post['hidden'][:, -1]))
+      loss = loss + surrogate
+      metrics['cache_surrogate'] = surrogate
+    return loss, (state, out, metrics)
+
+  def _cached_initial(self, data):
+    initial_latent, initial_action = self.initial(len(data['is_first']))
+    cached_hidden = (
+        data['_r2r_initial_state_real'] +
+        1j * data['_r2r_initial_state_imag']).astype(jnp.complex64)
+    valid = (
+        data['_r2r_initial_valid'].astype(bool) &
+        ~data['is_first'][:, 0].astype(bool))
+    latent = dict(initial_latent)
+    latent['hidden'] = jnp.where(
+        valid[:, None, None], cached_hidden, initial_latent['hidden'])
+    cached_stoch = jax.nn.one_hot(
+        data['_r2r_initial_stoch'].astype(jnp.int32),
+        self.config.rssm.classes, dtype=initial_latent['stoch'].dtype)
+    latent['stoch'] = jnp.where(
+        valid[:, None, None], cached_stoch, initial_latent['stoch'])
+    cached_action = jax.nn.one_hot(
+        data['_r2r_initial_action'].astype(jnp.int32),
+        initial_action.shape[-1], dtype=initial_action.dtype)
+    action = jnp.where(valid[:, None], cached_action, initial_action)
+    return latent, action
+
+  @staticmethod
+  def _bf16_bits(value):
+    value = value.astype(jnp.bfloat16)
+    return jax.lax.bitcast_convert_type(value, jnp.uint16)
+
+  def _complex_bf16_bits(self, value):
+    return jnp.stack((
+        self._bf16_bits(value.real), self._bf16_bits(value.imag)), -1)
+
+  def _cache_updates(self, data, post, tap_grads):
+    slots = data['_r2r_slot'].astype(jnp.int32)
+    generations = data['_r2r_generation'].astype(jnp.int32)
+    anchor_slots = data['_r2r_anchor_slot'].astype(jnp.int32)
+    anchor_generations = data['_r2r_anchor_generation'].astype(jnp.int32)
+    adjoint_slots = jnp.concatenate(
+        (anchor_slots[:, None], slots[:, :-1]), axis=1)
+    adjoint_generations = jnp.concatenate(
+        (anchor_generations[:, None], generations[:, :-1]), axis=1)
+    terminal = data['is_last'].astype(bool)
+    terminal_slots = jnp.where(terminal, slots, -jnp.ones_like(slots))
+    terminal_generations = jnp.where(
+        terminal, generations, -jnp.ones_like(generations))
+    if not self.act_space.discrete:
+      raise NotImplementedError('R2R cache currently requires discrete actions')
+    return {
+        '_r2r_state_slots': slots,
+        '_r2r_state_generations': generations,
+        '_r2r_state_bits': self._complex_bf16_bits(post['hidden']),
+        '_r2r_stoch': jnp.argmax(post['stoch'], -1).astype(jnp.uint8),
+        '_r2r_action': jnp.argmax(data['action'], -1).astype(jnp.uint16),
+        '_r2r_adjoint_slots': adjoint_slots,
+        '_r2r_adjoint_generations': adjoint_generations,
+        '_r2r_adjoint_bits': self._complex_bf16_bits(tap_grads),
+        '_r2r_terminal_slots': terminal_slots,
+        '_r2r_terminal_generations': terminal_generations,
+    }
 
   def imagine(self, policy, start, horizon):
     first_cont = (1.0 - start['is_terminal']).astype(jnp.float32)

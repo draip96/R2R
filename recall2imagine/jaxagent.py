@@ -24,6 +24,8 @@ def Wrapper(agent_cls):
 class JAXAgent(embodied.Agent):
 
   def __init__(self, agent_cls, obs_space, act_space, step, config):
+    self.root_config = config
+    self.act_space = act_space
     self.config = config.jax
     self.batch_size = config.batch_size
     self.batch_length = config.batch_length
@@ -50,6 +52,34 @@ class JAXAgent(embodied.Agent):
     self.varibs = self._init_varibs(obs_space, act_space)
     self.sync()
 
+  @property
+  def state_adjoint_cache_spec(self):
+    config = self.root_config
+    cache = config.state_gradient_cache
+    if not cache.enabled:
+      return {'enabled': False}
+    if cache.storage_dtype != 'bfloat16':
+      raise ValueError('R2R state and adjoint storage must be bfloat16')
+    if config.ssm_type != 'mimo':
+      raise ValueError('R2R state-gradient caching currently supports MIMO only')
+    if not config.rssm.nonrecurrent_enc:
+      raise ValueError('R2R requires R2I\'s non-recurrent posterior encoder')
+    if not config.ssm.parallel:
+      raise ValueError('R2R requires the parallel SSM scan')
+    if config.ssm_cell.reset_mode == 'none':
+      raise ValueError('R2R must reset state and adjoints at true boundaries')
+    action = self.act_space['action']
+    if not action.discrete or len(action.shape) != 1:
+      raise ValueError('R2R cache currently requires one-hot discrete actions')
+    return {
+        'enabled': True,
+        'layers': int(config.ssm.n_layers),
+        'width': int(config.rssm.hidden),
+        'stoch': int(config.rssm.stoch),
+        'classes': int(config.rssm.classes),
+        'action_dim': int(action.shape[0]),
+    }
+
   def policy(self, obs, state=None, mode='train'):
     obs = obs.copy()
     obs = self._convert_inps(obs, self.policy_devices)
@@ -66,6 +96,24 @@ class JAXAgent(embodied.Agent):
     # TODO: Consider keeping policy states in accelerator memory.
     state = self._convert_outs(state, self.policy_devices)
     return outs, state
+
+  def model_reward_choice(self, state):
+    state = tree_map(
+        np.asarray, state, is_leaf=lambda x: isinstance(x, list))
+    state = self._convert_inps(state, self.policy_devices)
+    rng = self._next_rngs(self.policy_devices)
+    varibs = self.varibs if self.single_device else self.policy_varibs
+    outputs, _ = self._model_reward_choice(varibs, rng, state)
+    return self._convert_outs(outputs, self.policy_devices)
+
+  def actor_from_state(self, state):
+    state = tree_map(
+        np.asarray, state, is_leaf=lambda x: isinstance(x, list))
+    state = self._convert_inps(state, self.policy_devices)
+    rng = self._next_rngs(self.policy_devices)
+    varibs = self.varibs if self.single_device else self.policy_varibs
+    outputs, _ = self._actor_from_state(varibs, rng, state)
+    return self._convert_outs(outputs, self.policy_devices)
 
   def train(self, data, state=None):
     rng = self._next_rngs(self.train_devices)
@@ -173,6 +221,8 @@ class JAXAgent(embodied.Agent):
     self._init_policy = nj.pure(lambda x: self.agent.policy_initial(len(x)))
     self._init_train = nj.pure(lambda x: self.agent.train_initial(len(x)))
     self._policy = nj.pure(self.agent.policy)
+    self._model_reward_choice = nj.pure(self.agent.model_reward_choice)
+    self._actor_from_state = nj.pure(self.agent.actor_from_state)
     self._train = nj.pure(self.agent.train)
     self._report = nj.pure(self.agent.report)
     if len(self.train_devices) == 1:
@@ -189,10 +239,17 @@ class JAXAgent(embodied.Agent):
       kw = dict(device=self.policy_devices[0])
       self._init_policy = nj.jit(self._init_policy, **kw)
       self._policy = nj.jit(self._policy, static=['mode'], **kw)
+      self._model_reward_choice = nj.jit(
+          self._model_reward_choice, **kw)
+      self._actor_from_state = nj.jit(self._actor_from_state, **kw)
     else:
       kw = dict(devices=self.policy_devices)
       self._init_policy = nj.pmap(self._init_policy, 'i', **kw)
       self._policy = nj.pmap(self._policy, 'i', static=['mode'], **kw)
+      self._model_reward_choice = nj.pmap(
+          self._model_reward_choice, 'i', **kw)
+      self._actor_from_state = nj.pmap(
+          self._actor_from_state, 'i', **kw)
 
   def _convert_inps(self, value, devices):
     if len(devices) == 1:
@@ -241,6 +298,28 @@ class JAXAgent(embodied.Agent):
     rng = self._next_rngs(self.train_devices, mirror=True)
     dims = (self.batch_size, self.batch_length)
     data = self._dummy_batch({**obs_space, **act_space}, dims)
+    if self.root_config.state_gradient_cache.enabled:
+      spec = self.state_adjoint_cache_spec
+      batch, length = dims
+      data.update({
+          '_r2r_slot': np.zeros((batch, length), np.int32),
+          '_r2r_generation': np.zeros((batch, length), np.int32),
+          '_r2r_anchor_slot': np.zeros((batch,), np.int32),
+          '_r2r_anchor_generation': np.zeros((batch,), np.int32),
+          '_r2r_initial_state_real': np.zeros(
+              (batch, spec['layers'], spec['width']), np.float32),
+          '_r2r_initial_state_imag': np.zeros(
+              (batch, spec['layers'], spec['width']), np.float32),
+          '_r2r_initial_stoch': np.zeros(
+              (batch, spec['stoch']), np.uint8),
+          '_r2r_initial_action': np.zeros((batch,), np.uint16),
+          '_r2r_initial_valid': np.zeros((batch,), bool),
+          '_r2r_future_adjoint_real': np.zeros(
+              (batch, spec['layers'], spec['width']), np.float32),
+          '_r2r_future_adjoint_imag': np.zeros(
+              (batch, spec['layers'], spec['width']), np.float32),
+          '_r2r_future_adjoint_valid': np.zeros((batch,), bool),
+      })
     data = self._convert_inps(data, self.train_devices)
     state, varibs = self._init_train(varibs, rng, data['is_first'])
     varibs = self._train(varibs, rng, data, state, init_only=True)

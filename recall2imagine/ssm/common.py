@@ -311,7 +311,9 @@ def matrix_operator_without_dones(q_i, q_j):
     A_j, b_j = q_j
     return A_j @ A_i, A_j @ b_i + b_j
 
-def fast_scan(Ab, Bb, Cb, u, x0, init, dones=None, conj_sym=False, mode='init'):
+def fast_scan(
+    Ab, Bb, Cb, u, x0, init, dones=None, conj_sym=False, mode='init',
+    state_taps=None):
     """ 
     Compute the LxH output of discretized SSM given an LxH input.
     Uses parallel scan.
@@ -351,6 +353,9 @@ def fast_scan(Ab, Bb, Cb, u, x0, init, dones=None, conj_sym=False, mode='init'):
         A = Ab * np.ones((u.shape[0], Ab.shape[0]))
         A = np.concatenate((np.ones((1, Ab.shape[0]), dtype=A.dtype), A), axis=0)
         B = jax.vmap(lambda u_: Bb @ u_)(u)
+        if state_taps is not None:
+            tap_mask = 1.0 if dones is None else (1.0 - dones)[..., None]
+            B = B + Ab[None] * state_taps * tap_mask
     else:
         if mode == 'stop_grad':
             operator_with_dones = matrix_operator_with_dones_sg
@@ -362,12 +367,22 @@ def fast_scan(Ab, Bb, Cb, u, x0, init, dones=None, conj_sym=False, mode='init'):
         A = np.concatenate((np.eye(Ab.shape[0])[None], Abs), axis=0)
 
         B = jax.vmap(lambda u_: Bb @ u_)(u[..., None])
+        if state_taps is not None:
+            tap_mask = 1.0 if dones is None else (1.0 - dones)[..., None, None]
+            B = B + jax.vmap(lambda tap: Ab @ tap)(
+                state_taps[..., None]) * tap_mask
     B = np.concatenate((x0[..., np.newaxis, :], B), axis=0)
 
     if dones is None:
         _, xs = jax.lax.associative_scan(operator_without_dones, (A, B))
     else:
-        dones = np.insert(dones, -1, 0)
+        if state_taps is None:
+            # Preserve the unmodified R2I path byte-for-byte when caching is
+            # disabled. R2R's tapped path aligns real reset flags with the
+            # synthetic leading x0 element so credit cannot cross episodes.
+            dones = np.insert(dones, -1, 0)
+        else:
+            dones = np.concatenate((np.zeros_like(dones[:1]), dones), axis=0)
         zeros = np.repeat(np.expand_dims(init, 0), B.shape[0], 0)
         _, xs, zs, ds = jax.lax.associative_scan(operator_with_dones, (A, B, zeros, dones))
 
@@ -478,13 +493,19 @@ class SingleLayer(nn.Module):
         Forward pass for the layer
         """
         if isinstance(x, tuple):
-            x, dones = x
+            if len(x) == 3:
+                x, dones, state_taps = x
+            else:
+                x, dones = x
+                state_taps = None
         else:
             dones = None
+            state_taps = None
         skip = x
         if self.use_norm and self.prenorm:
             x = self.norm(x)
-        x, outstate = self.seq(x, state, init, dones)
+        x, outstate = self.seq(
+            x, state, init, dones, state_taps=state_taps)
         if self.dropout != 0:
             x = self.drop(nn.gelu(x))
         else:
@@ -529,16 +550,32 @@ class SequenceBlock(nn.Module):
         Foreard pass for the block
         """
         outstate = []
+        if isinstance(x, tuple):
+            if len(x) == 3:
+                x, dones, state_taps = x
+            else:
+                x, dones = x
+                state_taps = None
+        else:
+            dones = None
+            state_taps = None
         if zero_state is not None:
-            for hidden, init, layer in zip(state, zero_state, self.layers):
-                x, h = layer(x, hidden, init)
+            for index, (hidden, init, layer) in enumerate(
+                    zip(state, zero_state, self.layers)):
+                tap = None if state_taps is None else state_taps[..., index, :]
+                layer_input = (x, dones) if tap is None else (x, dones, tap)
+                x, h = layer(layer_input, hidden, init)
+                x = x[0]
                 outstate.append(h)
         else:
-            for hidden, layer in zip(state, self.layers):
-                x, h = layer(x, hidden)
+            for index, (hidden, layer) in enumerate(zip(state, self.layers)):
+                tap = None if state_taps is None else state_taps[..., index, :]
+                layer_input = (x, dones) if tap is None else (x, dones, tap)
+                x, h = layer(layer_input, hidden)
+                x = x[0]
                 outstate.append(h)
         outstate = np.stack(outstate, axis=-2) # (batch, len, layers, dim) or (batch * len, layers, dim)
-        return x, outstate
+        return (x, dones), outstate
     
 def batchwise(layer): 
     """

@@ -54,6 +54,12 @@ class Checkpoint:
     else:
       self._save(filename, keys)
 
+  def wait(self):
+    """Wait until an asynchronous checkpoint, including replay, is durable."""
+    if self._parallel and self._promise is not None:
+      self._promise.result()
+      self._promise = None
+
   def _save(self, filename, keys):
     keys = tuple(self._values.keys() if keys is None else keys)
     assert all([not k.startswith('_') for k in keys]), keys

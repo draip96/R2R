@@ -191,20 +191,26 @@ class S3M(RSSM):
     return deter, {'deter': deter, 'hidden': hidden}
   
 
-  def _cell_scan(self, x, state, first, zero_state):
+  def _cell_scan(self, x, state, first, zero_state, state_taps=None):
     """
     Implements sequential forward pass for RSSM.
     """
     swap = lambda x: x.transpose([1, 0] + list(range(2, len(x.shape))))
     if not self._parallel:
+      if state_taps is not None:
+        raise NotImplementedError('R2R state taps require parallel SSM scans')
       state, (outs, x) = super()._cell_scan(x, state, first, zero_state)
       return state, (tree_map(swap, outs), swap(x))
     
     if self._ssm == 'siso':
       first = jnp.tile(first[..., None], (1, 1, x.shape[-1]))
-    x, outstate = self.core((swap(x), swap(first)), state['hidden'], zero_state['hidden']) # hidden.shape = (batch, layers, hidden, units)
+    core_input = (swap(x), swap(first))
+    if state_taps is not None:
+      core_input = (swap(x), swap(first), state_taps)
+    x, outstate = self.core(
+        core_input, state['hidden'], zero_state['hidden']) # hidden.shape = (batch, layers, hidden, units)
     if isinstance(x, tuple):
-      x, _ = x
+      x = x[0]
     if self._ssm == 'siso':
       # (batch, seq, units, layers, hidden) -> (batch, seq, layers, hidden, units)
       outstate = jnp.transpose(outstate, (0, 1, 3, 4, 2))

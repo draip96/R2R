@@ -1,6 +1,7 @@
 import time
 import pickle
 import bz2
+import os
 from collections import defaultdict, deque
 from functools import partial as bind
 import pickle
@@ -15,6 +16,8 @@ from . import selectors, limiters
 from .lfs_manager import LFSManager
 from . import selectors
 from .chunk import Chunk, ChunkSerializer
+from .state_adjoint_cache import (
+    DenseStateAdjointCache, aligned_capacity, sample_slot_layout)
 
 class FIFO_LFS:
   """
@@ -82,7 +85,14 @@ class FIFO_LFS:
     self.bwd_links = {}
     self.fwd_links = {}
     self.inv_table = {}
+    self.chunk_generations = {}
     self.online = online
+    self.cache = None
+    self.cache_write_metrics = {
+        'state_rows_written': 0,
+        'adjoint_rows_written': 0,
+        'terminal_rows_zeroed': 0,
+    }
     if self.online:
       self.online_queue = deque()
       self.online_stride = length
@@ -99,6 +109,25 @@ class FIFO_LFS:
 
   def set_agent(self, agent):
     self._agent = agent
+    spec = getattr(agent, 'state_adjoint_cache_spec', None)
+    if not spec or not spec.get('enabled', False) or self.cache is not None:
+      return
+    padded_capacity = aligned_capacity(self.capacity, self.length)
+    local = os.path.join(str(self.manager.tmp_path), 'state_adjoint_cache')
+    mirror = None
+    if self.manager.use_lfs:
+      mirror = os.path.join(
+          str(self.manager.lfs_path), 'state_adjoint_cache')
+    self.cache = DenseStateAdjointCache(
+        directory=local,
+        mirror_directory=mirror,
+        capacity=padded_capacity,
+        layers=spec['layers'],
+        width=spec['width'],
+        stoch=spec['stoch'],
+        classes=spec['classes'],
+        action_dim=spec['action_dim'])
+    print('R2R state-adjoint cache:', self.cache.spec)
 
   def __len__(self):
     return len(self.table) * self.length
@@ -120,6 +149,12 @@ class FIFO_LFS:
         'sample_wait_avg': ratio(m['sample_wait_dur'], m['samples']),
         'sample_wait_frac': ratio(m['sample_wait_count'], m['samples']),
     }
+    if self.cache is not None:
+      stats.update({
+          'cache_' + key: value
+          for key, value in self.cache_write_metrics.items()})
+      stats['cache_state_adjoint_bytes'] = self.cache.spec[
+          'state_adjoint_bytes']
     for key in self.metrics:
       self.metrics[key] = 0
     return stats
@@ -153,13 +188,23 @@ class FIFO_LFS:
     old_buffer = self.chunk_buffers[worker]
     self.chunk_buffers[worker] = Chunk(self.chunks)
     old_buffer.successor = self.chunk_buffers[worker].uuid_b
+    expected_offset = self.manager.offset
+    write_generation = self.manager.overwrite_layers
+    if self.cache is not None:
+      # Invalidate before the replay write because write_chunk() may trigger a
+      # persistent checkpoint through the LFS manager.
+      self.cache.invalidate_chunk(
+          expected_offset, write_generation, self.length)
     _, offset = self.manager.write_chunk(old_buffer)
+    if self.cache is not None and offset != expected_offset:
+      raise RuntimeError('replay and state cache physical offsets diverged')
     if offset in self.inv_table:
       # we are overriding the table entry
       try: # handling race condition
         key = self.inv_table[offset]
         del self.table[key]
         del self.sampler[key]
+        self.chunk_generations.pop(key, None)
       except KeyError:
         pass
       if key in self.bwd_links:
@@ -179,6 +224,7 @@ class FIFO_LFS:
             pass
     self.inv_table[offset] = old_buffer.uuid_b
     self.table[old_buffer.uuid_b] = offset
+    self.chunk_generations[old_buffer.uuid_b] = write_generation
     self.bwd_links[old_buffer.successor] = old_buffer.uuid_b
     self.fwd_links[old_buffer.uuid_b] = old_buffer.successor 
     self.sampler[old_buffer.uuid_b] = offset
@@ -187,8 +233,34 @@ class FIFO_LFS:
   def ready(self):
     return self.serializer is not None
 
-  def set_agent(self, agent):
-    self._agent = agent
+  def make_batch_buffer(self, num_buffers, batch_size, sequence_length):
+    batch = self.serializer.batch_buffer(
+        num_buffers, batch_size, sequence_length)
+    if self.cache is None:
+      return batch
+    prefix = (num_buffers, batch_size)
+    batch.update({
+        '_r2r_slot': np.empty(
+            prefix + (sequence_length,), dtype=np.int32),
+        '_r2r_generation': np.empty(
+            prefix + (sequence_length,), dtype=np.int32),
+        '_r2r_anchor_slot': np.empty(prefix, dtype=np.int32),
+        '_r2r_anchor_generation': np.empty(prefix, dtype=np.int32),
+        '_r2r_initial_state_real': np.empty(
+            prefix + (self.cache.layers, self.cache.width), np.float32),
+        '_r2r_initial_state_imag': np.empty(
+            prefix + (self.cache.layers, self.cache.width), np.float32),
+        '_r2r_initial_stoch': np.empty(
+            prefix + (self.cache.stoch,), np.uint8),
+        '_r2r_initial_action': np.empty(prefix, np.uint16),
+        '_r2r_initial_valid': np.empty(prefix, np.bool_),
+        '_r2r_future_adjoint_real': np.empty(
+            prefix + (self.cache.layers, self.cache.width), np.float32),
+        '_r2r_future_adjoint_imag': np.empty(
+            prefix + (self.cache.layers, self.cache.width), np.float32),
+        '_r2r_future_adjoint_valid': np.empty(prefix, np.bool_),
+    })
+    return batch
 
   def serialize(self, ):
     data = {
@@ -200,6 +272,7 @@ class FIFO_LFS:
       'was': dict(self.was),
       'offset': self.manager.offset,
       'layers': self.manager.overwrite_layers,
+      'chunk_generations': self.chunk_generations,
     }
     if self.serializer is not None:
       data['serializer'] = self.serializer.pattern
@@ -216,7 +289,10 @@ class FIFO_LFS:
       env_step = {k: v[0] for k, v in serializer.dummy_chunk().items()}
       self.serializer = serializer
       self.manager.serializer = serializer
-      self.manager.initialize(environment_step=env_step, length=self.length)
+      # We are already deserializing the prefix. Calling the loader again from
+      # initialize() would recursively re-enter this method on resume.
+      self.manager.initialize(
+          environment_step=env_step, length=self.length, load_prefix=False)
     self.fwd_links = data['fwd_links']
     self.bwd_links = data['bwd_links']
     self.table = data['table']
@@ -227,6 +303,21 @@ class FIFO_LFS:
     self.manager.offset = data['offset']
     self.manager.lfs_offset = data['offset']
     self.manager.overwrite_layers = data['layers']
+    if 'chunk_generations' in data:
+      self.chunk_generations = data['chunk_generations']
+    else:
+      # Safe migration for an upstream replay created before R2R tracked
+      # physical generations explicitly. Entries behind the write pointer are
+      # from the current ring pass; entries ahead are from the previous pass.
+      layer = int(self.manager.overwrite_layers)
+      pointer = int(self.manager.offset)
+      self.chunk_generations = {
+          key: (layer if layer == 0 or offset < pointer else layer - 1)
+          for key, offset in self.table.items()}
+    if self.cache is not None:
+      for key, offset in self.table.items():
+        self.cache.reconcile_chunk(
+            offset, self.chunk_generations[key], self.length)
 
   def sample(self, flip: int, worker_id: int, batch_buffer):
     dur = wait(self.limiter.want_sample, 'Replay sample is waiting')
@@ -246,16 +337,15 @@ class FIFO_LFS:
         continue
       _, chunk = self.manager.read_chunk(flip, offset, worker_id, 0)
       end_pos = self.rng.integers(1, self.length + 1).item()
+      prev_key = None
+      prev_offset = -1
       if end_pos < self.length:
         try:
           prev_key = self.bwd_links[key]
           prev_offset = self.table[prev_key]
         except KeyError:
-          # this is an extremely rare race condition 
-          # it happens about once in 300M environment steps
-          # if after getting the key from the table,
-          # that key is deleted before entering this try 
-          # block, this except will be triggered.
+          # This is the same replay-integrity retry as unmodified R2I. Cache
+          # metadata itself must never introduce another sampling attempt.
           trying = True
           continue
         _, prev_chunk = self.manager.read_chunk(flip, prev_offset, worker_id, 1)
@@ -267,11 +357,72 @@ class FIFO_LFS:
           trying = True
       else:
         chunk = chunk.data
-    if 'is_first' in chunk:
+      if self.cache is not None:
+        current_generation = self.chunk_generations.get(key, -1)
+        if prev_key is None:
+          # A predecessor disappearing after the upstream topology check is a
+          # valid full-chunk sample. Represent its cache boundary as missing
+          # instead of resampling it.
+          try:
+            prev_key = self.bwd_links[key]
+            prev_offset = self.table[prev_key]
+          except KeyError:
+            prev_key = None
+            prev_offset = -1
+        previous_generation = (
+            -1 if prev_key is None
+            else self.chunk_generations.get(prev_key, -1))
+    # Unmodified R2I fabricated a reset at every sampled boundary. R2R keeps
+    # that legacy behavior only when the dense cache is disabled.
+    if 'is_first' in chunk and self.cache is None:
       chunk['is_first'][0] = True
     for k in chunk.keys():
       batch_buffer[k][flip, worker_id] = chunk[k]
+    if self.cache is not None:
+      layout = sample_slot_layout(
+          self.length, end_pos, offset, current_generation,
+          prev_offset, previous_generation)
+      slots = layout['slots']
+      generations = layout['generations']
+      anchor_slot = layout['anchor_slot']
+      anchor_generation = layout['anchor_generation']
+      gathered = self.cache.gather_boundaries(
+          np.asarray([anchor_slot], np.int32),
+          np.asarray([anchor_generation], np.int32),
+          np.asarray([slots[-1]], np.int32),
+          np.asarray([generations[-1]], np.int32))
+      batch_buffer['_r2r_slot'][flip, worker_id] = slots
+      batch_buffer['_r2r_generation'][flip, worker_id] = generations
+      batch_buffer['_r2r_anchor_slot'][flip, worker_id] = anchor_slot
+      batch_buffer['_r2r_anchor_generation'][
+          flip, worker_id] = anchor_generation
+      for name, value in gathered.items():
+        batch_buffer['_r2r_' + name][flip, worker_id] = value[0]
     return True
+
+  def update_cache(self, outputs):
+    if self.cache is None:
+      return None
+    names = {
+        '_r2r_state_slots': 'state_slots',
+        '_r2r_state_generations': 'state_generations',
+        '_r2r_state_bits': 'state_bits',
+        '_r2r_stoch': 'stoch',
+        '_r2r_action': 'action',
+        '_r2r_adjoint_slots': 'adjoint_slots',
+        '_r2r_adjoint_generations': 'adjoint_generations',
+        '_r2r_adjoint_bits': 'adjoint_bits',
+        '_r2r_terminal_slots': 'terminal_slots',
+        '_r2r_terminal_generations': 'terminal_generations',
+    }
+    missing = [key for key in names if key not in outputs]
+    if missing:
+      raise KeyError('learner omitted cache updates {}'.format(missing))
+    result = self.cache.commit({
+        target: outputs[source] for source, target in names.items()})
+    for key, value in result.items():
+      self.cache_write_metrics[key] += int(value)
+    return result
 
   def _remove(self, key):
     wait(self.limiter.want_remove, 'Replay remove is waiting')
@@ -288,6 +439,16 @@ class FIFO_LFS:
       self.sampler.prioritize(ids, prios)
 
   def save(self, wait=True, lfs_only=False):
+    del wait
+    if self.cache is not None:
+      self.cache.flush(mirror=False)
+    if not lfs_only:
+      # Publish ordinary replay payloads before the sidecar and publish the
+      # replay table last. After a crash, a restored table can therefore never
+      # refer to a newer cache generation than the mirrored replay chunk.
+      self.manager.maybe_flush(force=True, trigger_saving=False)
+    if self.cache is not None and self.manager.use_lfs:
+      self.cache.flush(mirror=True)
     table_bytes = self.serialize()
     assert self._agent is not None, 'Please call .set_agent(agent)!!!'
     with io.BytesIO() as stream:
@@ -305,15 +466,6 @@ class FIFO_LFS:
     # chunks in the long-term storage
     # note that the line below has an effect only if
     # we use a long-term storage
-    if not lfs_only: 
-      # to avoid infinite recursion the lfs_only flag is introduced here.
-      # this is because .maybe_flush triggers another call of this save method,
-      # which is needed if .maybe_flush is invoked by data worker 
-      # (when we collected enough chunks and we need to store them in lfs;
-      #  so to keep the buffer consistent we save the replay buffer table 
-      #  right after flushing the latest).
-      # in that case 
-      self.manager.maybe_flush(force=True, trigger_saving=False)
     return table_bytes
 
   def maybe_restore(self):

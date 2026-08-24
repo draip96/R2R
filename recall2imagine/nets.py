@@ -23,10 +23,14 @@ class RSSM(nj.Module):
   def _cell(self, x, prev_state):
     return NotImplemented
 
-  def observe(self, embed, action, is_first, state=None):
+  def observe(self, embed, action, is_first, state=None, state_taps=None):
     if self._nonrecurrent_enc:
-      return self.observe_nonrecurrent_enc(embed, action, is_first, state)
+      return self.observe_nonrecurrent_enc(
+          embed, action, is_first, state, state_taps=state_taps)
     else:
+      if state_taps is not None:
+        raise NotImplementedError(
+            'R2R state taps require the non-recurrent encoder')
       return self.observe_recurrent_enc(embed, action, is_first, state)
 
   def observe_recurrent_enc(self, embed, action, is_first, state=None):
@@ -53,7 +57,8 @@ class RSSM(nj.Module):
     prior = {k: swap(v) for k, v in prior.items()}
     return post, prior
   
-  def observe_nonrecurrent_enc(self, embed, action, is_first, state=None):
+  def observe_nonrecurrent_enc(
+      self, embed, action, is_first, state=None, state_taps=None):
     """
     action.shape (b, t, adim)
     is_first.shape (b, t,)
@@ -102,7 +107,8 @@ class RSSM(nj.Module):
       swap(x), 
       {'deter': state['deter'], 'hidden': state['hidden']}, 
       swap(is_first), # we mask inputs of the cell
-      {'deter': zero_state['deter'], 'hidden': zero_state['hidden']}
+      {'deter': zero_state['deter'], 'hidden': zero_state['hidden']},
+      state_taps=state_taps,
     )
     sequence, x = cast(x)
     x = self.get('img_out', Linear, **self._kw)(x)
@@ -113,7 +119,7 @@ class RSSM(nj.Module):
     post.update(sequence)
     return cast(post), cast(prior)
 
-  def _cell_scan(self, x, state, first, zero_state):
+  def _cell_scan(self, x, state, first, zero_state, state_taps=None):
     # x.shape (t, b, d)
     # inputs = (x, is_first)
     swap = lambda x: x.transpose([1, 0] + list(range(2, len(x.shape))))
@@ -128,6 +134,8 @@ class RSSM(nj.Module):
       # return carry state (this one is lost after the scan)
       # and a pair of carry state and the output to accumulate both
       return new, (new, y)
+    if state_taps is not None:
+      raise NotImplementedError('sequential RSSM does not expose state taps')
     carry, res = jaxutils.scan2(step, (x, first), state, modify=False, unroll=self._unroll)
     return carry, tree_map(swap, res)
 

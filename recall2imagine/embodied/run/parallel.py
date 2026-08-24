@@ -2,6 +2,8 @@ import sys
 import time
 import logging
 import threading
+import os
+from pathlib import Path
 from collections import defaultdict
 
 import embodied
@@ -120,9 +122,23 @@ def learner(step, agent, replay, logger, timer, args):
   while True:
     batch = next(dataset)
     outs, state, mets = agent.train(batch, state)
+    if hasattr(replay, 'update_cache'):
+      replay.update_cache(outs)
     metrics.add(mets)
     updates.increment()
     stats['batch_entries'] += batch['is_first'].size
+    if int(step) >= int(args.steps):
+      checkpoint.save()
+      checkpoint.wait()
+      (Path(str(args.logdir)) / 'COMPLETE').write_text(
+          'configured environment interaction budget reached\n')
+      os._exit(0)
+    if embodied.run.requeue_requested():
+      checkpoint.save()
+      checkpoint.wait()
+      (Path(str(args.logdir)) / 'REQUEUE_READY').write_text(
+          'checkpoint and replay cache flushed after SIGUSR1\n')
+      os._exit(75)
 
     if should_sync(updates):
       agent.sync()

@@ -80,6 +80,8 @@ def train_eval(
       with timer.scope('dataset_train'):
         batch[0] = next(dataset_train)
       outs, state[0], mets = agent.train(batch[0], state[0])
+      if hasattr(train_replay, 'update_cache'):
+        train_replay.update_cache(outs)
       metrics.add(mets, prefix='train')
       if 'priority' in outs:
         train_replay.prioritize(outs['key'], outs['priority'])

@@ -93,6 +93,8 @@ def train_save(agent, env, replay, logger, args):
       with timer.scope('dataset'):
         batch[0] = next(dataset)
       outs, state[0], mets = agent.train(batch[0], state[0])
+      if hasattr(replay, 'update_cache'):
+        replay.update_cache(outs)
       metrics.add(mets, prefix='train')
       if 'priority' in outs:
         replay.prioritize(outs['key'], outs['priority'])

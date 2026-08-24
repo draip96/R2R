@@ -437,7 +437,9 @@ class Optimizer(nj.Module):
       self.good_steps = nj.Variable(
           jnp.array, 0, jnp.int32, name='good_steps')
 
-  def __call__(self, modules, lossfn, *args, has_aux=False, **kwargs):
+  def __call__(
+      self, modules, lossfn, *args, has_aux=False,
+      input_grad_argnums=(), **kwargs):
     def wrapped(*args, **kwargs):
       outs = lossfn(*args, **kwargs)
       loss, aux = outs if has_aux else (outs, None)
@@ -447,16 +449,29 @@ class Optimizer(nj.Module):
         loss *= sg(self.grad_scale.read())
       return loss, aux
     metrics = {}
-    loss, params, grads, aux = nj.grad(
-        wrapped, modules, has_aux=True)(*args, **kwargs)
+    input_grad_argnums = tuple(input_grad_argnums)
+    differentiated = nj.grad(
+        wrapped, modules, has_aux=True,
+        input_argnums=input_grad_argnums)(*args, **kwargs)
+    if input_grad_argnums:
+      loss, params, grads, aux, input_grads = differentiated
+    else:
+      loss, params, grads, aux = differentiated
+      input_grads = ()
     if not self.PARAM_COUNTS[self.path]:
       count = tree_reduce(add, tree_map(lambda x: np.prod(x.shape), params))
       print(f'Optimizer {self.name} has {count:,} variables.')
       self.PARAM_COUNTS[self.path] = count
     if parallel():
       grads = tree_map(lambda x: jax.lax.pmean(x, 'i'), grads)
+      # Input cotangents belong to different replay rows on each device and
+      # therefore must not be pmean'ed together. Keep their local-loss scale:
+      # when they are consumed, the resulting parameter gradients are pmean'ed
+      # exactly once, matching the native global-batch mean.
     if self.scaling:
       grads = tree_map(lambda x: x / self.grad_scale.read(), grads)
+      input_grads = tree_map(
+          lambda x: x / self.grad_scale.read(), input_grads)
       finite = self._update_scale(grads)
       metrics[f'{self.name}_grad_scale'] = self.grad_scale.read()
       metrics[f'{self.name}_grad_overflow'] = (~finite).astype(jnp.float32)
@@ -505,6 +520,8 @@ class Optimizer(nj.Module):
     metrics.update(flax_norms)
     metrics['grad_steps'] = self.step.read()
     metrics = {f'{self.name}_{k}': v for k, v in metrics.items()}
+    if input_grad_argnums:
+      return (metrics, aux, input_grads) if has_aux else (metrics, input_grads)
     return (metrics, aux) if has_aux else metrics
 
   def _update_scale(self, grads):

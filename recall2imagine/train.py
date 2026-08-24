@@ -30,11 +30,29 @@ from embodied import wrappers
 def main(argv=None):
   from . import agent as agt
 
+  embodied.run.install_requeue()
+
   parsed, other = embodied.Flags(configs=['defaults']).parse_known(argv)
   config = embodied.Config(agt.Agent.configs['defaults'])
   for name in parsed.configs:
     config = config.update(agt.Agent.configs[name])
   config = embodied.Flags(config).parse(other)
+  if config.state_gradient_cache.enabled:
+    expected_batches = {64: 64, 128: 32, 256: 16, 1024: 4}
+    if config.batch_length not in expected_batches:
+      raise ValueError(
+          'R2R window must be one of {}'.format(tuple(expected_batches)))
+    expected = expected_batches[config.batch_length]
+    if config.batch_size != expected:
+      raise ValueError(
+          'R2R window {} requires batch {}, got {}'.format(
+              config.batch_length, expected, config.batch_size))
+    if config.batch_size * config.batch_length != 4096:
+      raise ValueError('every R2R optimizer batch must contain 4096 transitions')
+    if int(config.replay_size) != 1_000_000:
+      raise ValueError('R2R replay capacity is fixed at 1,000,000 transitions')
+    if config.replay != 'lfs':
+      raise ValueError('R2R state-gradient caching requires the LFS replay')
   args = embodied.Config(
       **config.run, logdir=config.logdir,
       replay_dir=config.replay_dir,
@@ -64,11 +82,34 @@ def main(argv=None):
       replay.set_agent(agent)
       embodied.run.train(agent, env, replay, logger, args, config)
 
+    elif args.script == 'train_toy':
+      replay = make_replay(config, replay_dir)
+      env = make_envs(config)
+      eval_env = make_envs(
+          config, seed=config.seed + 10_000_019, balanced=True)
+      cleanup += [env, eval_env]
+      agent = agt.Agent(env.obs_space, env.act_space, step, config)
+      replay.set_agent(agent)
+      embodied.run.train_toy(
+          agent, env, eval_env, replay, logger, args, config)
+
+    elif args.script == 'train_bsuite':
+      replay = make_replay(config, replay_dir)
+      env = make_envs(config)
+      eval_env = make_envs(
+          config, seed=config.seed + 10_000_019, balanced=True)
+      cleanup += [env, eval_env]
+      agent = agt.Agent(env.obs_space, env.act_space, step, config)
+      replay.set_agent(agent)
+      embodied.run.train_bsuite(
+          agent, env, eval_env, replay, logger, args, config)
+
     elif args.script == 'train_save':
       replay = make_replay(config, logdir / 'replay')
       env = make_envs(config)
       cleanup.append(env)
       agent = agt.Agent(env.obs_space, env.act_space, step, config)
+      replay.set_agent(agent)
       embodied.run.train_save(agent, env, replay, logger, args)
 
     elif args.script == 'train_eval':
@@ -78,8 +119,10 @@ def main(argv=None):
       eval_env = make_envs(config)  # mode='eval'
       cleanup += [env, eval_env]
       agent = agt.Agent(env.obs_space, env.act_space, step, config)
+      train_replay = replay
+      train_replay.set_agent(agent)
       embodied.run.train_eval(
-          agent, env, eval_env, replay, eval_replay, logger, args)
+          agent, env, eval_env, train_replay, eval_replay, logger, args)
 
     elif args.script == 'train_holdout':
       replay = make_replay(config, logdir / 'replay')
@@ -92,6 +135,7 @@ def main(argv=None):
       env = make_envs(config)
       cleanup.append(env)
       agent = agt.Agent(env.obs_space, env.act_space, step, config)
+      replay.set_agent(agent)
       embodied.run.train_holdout(
           agent, env, replay, eval_replay, logger, args)
 
@@ -173,7 +217,10 @@ def make_envs(config, **overrides):
   suite, task = config.task.split('_', 1)
   ctors = []
   for index in range(config.envs.amount):
-    ctor = lambda: make_env(config, **overrides)
+    env_overrides = dict(overrides)
+    if suite == 'toymemory' and 'seed' not in env_overrides:
+      env_overrides['seed'] = int(config.seed) + index
+    ctor = lambda values=env_overrides: make_env(config, **values)
     if config.envs.parallel != 'none':
       ctor = bind(embodied.Parallel, ctor, config.envs.parallel)
     if config.envs.restart:
@@ -199,6 +246,7 @@ def make_env(config, **overrides):
       'minecraft': 'embodied.envs.minecraft:Minecraft',
       'loconav': 'embodied.envs.loconav:LocoNav',
       'pinpad': 'embodied.envs.pinpad:PinPad',
+      'toymemory': 'embodied.envs.toy_memory:ToyMemory',
   }[suite]
   if isinstance(ctor, str):
     module, cls = ctor.split(':')

@@ -179,8 +179,12 @@ class BatcherSM:
         if not self.tasks.empty() and self._replay.ready:
           if self._batch_buffers is None:
             self._serializer = self._replay.serializer
-            self._batch_buffers = self._serializer.batch_buffer(
-              self.prefetch_batch, self.batch_size, self.batch_sequence_len)
+            make_buffer = getattr(
+                self._replay, 'make_batch_buffer',
+                self._serializer.batch_buffer)
+            self._batch_buffers = make_buffer(
+                self.prefetch_batch, self.batch_size,
+                self.batch_sequence_len)
           flip, task_id = self.tasks.get()
           success = self._replay.sample(flip, task_id, self._batch_buffers)
           assert success

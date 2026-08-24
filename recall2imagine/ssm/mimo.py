@@ -341,7 +341,7 @@ class MIMOLayer(nn.Module):
         else:
             raise NotImplementedError("Discretization method {} not implemented".format(self.discretization))
 
-    def __call__(self, u, x0, init, dones=None):
+    def __call__(self, u, x0, init, dones=None, state_taps=None):
         """
         Compute the LxH output of the SSM given an LxH input sequence
         using a parallel scan.
@@ -354,10 +354,14 @@ class MIMOLayer(nn.Module):
         if self.parallel and u.shape[0] > 1:
             y, x = fast_scan(
                 self.Lambda_bar, self.B_bar, self.C_tilde, 
-                u, x0, init, dones, self.conj_sym, self.reset_mode)
+                u, x0, init, dones, self.conj_sym, self.reset_mode,
+                state_taps=state_taps)
             Du = jax.vmap(lambda u: self.D * u)(u)
             return y + Du, x
             
+        if state_taps is not None:
+            mask = 1.0 if dones is None else (1.0 - dones[0])
+            x0 = x0 + state_taps[0] * mask
         x, y = slow_scan(self.Lambda_bar, self.B_bar, self.C_tilde, u[0], x0, self.conj_sym)
         Du = jax.vmap(lambda u: self.D * u)(u)
         return y.reshape(-1).real + Du, x

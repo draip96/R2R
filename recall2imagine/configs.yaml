@@ -9,7 +9,7 @@ defaults:
   lfs_dir: none
   use_lfs: False
   replay: lfs
-  replay_size: 1e7
+  replay_size: 1e6
   wdb_name: R2I
   replay_online: False
   eval_dir: ''
@@ -38,6 +38,9 @@ defaults:
     eval_initial: True
     eval_eps: 1
     eval_samples: 1
+    toy_eval_every: 1000
+    toy_eval_episodes: 128
+    bsuite_eval_episodes: 1000
     train_ratio: 32.0
     train_fill: 0
     eval_fill: 0
@@ -71,6 +74,7 @@ defaults:
   data_loaders: 16
   num_buffers: 2
   unlocked_sampling: False
+  state_gradient_cache: {enabled: True, storage_dtype: bfloat16}
 
   # World Model
   grad_heads: [decoder, reward, cont]
@@ -184,7 +188,7 @@ mmaze:
   run.actor_batch: 40
   run.steps: 4e8
   run.script: parallel
-  replay_size: 1e7
+  replay_size: 1e6
   actent: 1e-3
   run.train_ratio: 64
   loss_scales.dyn: 0.8
@@ -232,6 +236,84 @@ popgym:
   .*\.units: 512
   encoder: {mlp_keys: 'observation', cnn_keys: '$^'}
   decoder: {mlp_keys: 'observation', cnn_keys: '$^'}
+
+r2r_w64:
+  batch_length: 64
+  batch_size: 64
+
+r2r_w128:
+  batch_length: 128
+  batch_size: 32
+
+r2r_w256:
+  batch_length: 256
+  batch_size: 16
+
+r2r_w1024:
+  batch_length: 1024
+  batch_size: 4
+
+bsuite:
+  task: toymemory_128
+  envs: {amount: 1, parallel: none}
+  jax.precision: float32
+  run:
+    script: train_bsuite
+    train_ratio: 1024
+    steps: 1e6
+    bsuite_eval_episodes: 1000
+  ssm_cell.discretization: zoh
+  ssm_cell.reset_mode: init
+  rssm.initial: zeros
+  replay_size: 1e6
+  actor.inputs: [stoch, hidden]
+  critic.inputs: [stoch, hidden]
+  rssm.deter: 512
+  encoder.mlp_layers: 5
+  encoder.mlp_units: 1024
+  decoder.mlp_layers: 5
+  decoder.mlp_units: 1024
+  ssm.n_layers: 3
+  .*\.cnn_depth: 32
+  .*\.layers: 2
+  .*\.units: 512
+  encoder: {mlp_keys: 'observation', cnn_keys: '$^'}
+  decoder: {mlp_keys: 'observation', cnn_keys: '$^'}
+
+toy_memory:
+  task: toymemory_128
+  envs: {amount: 1, parallel: none, restart: False}
+  jax.precision: float32
+  run:
+    script: train_toy
+    train_ratio: 1024
+    train_fill: 4096
+    steps: 25000
+    toy_eval_every: 1000
+    toy_eval_episodes: 128
+  ssm_cell.discretization: zoh
+  ssm_cell.reset_mode: init
+  rssm.initial: zeros
+  replay_size: 1e6
+  actor.inputs: [stoch, hidden]
+  critic.inputs: [stoch, hidden]
+  rssm.deter: 512
+  encoder.mlp_layers: 5
+  encoder.mlp_units: 1024
+  decoder.mlp_layers: 5
+  decoder.mlp_units: 1024
+  ssm.n_layers: 3
+  .*\.cnn_depth: 32
+  .*\.layers: 2
+  .*\.units: 512
+  encoder: {mlp_keys: 'observation', cnn_keys: '$^'}
+  decoder: {mlp_keys: 'observation', cnn_keys: '$^'}
+
+toy_memory128:
+  task: toymemory_128
+
+toy_memory256:
+  task: toymemory_256
 
 tiny:
   rssm.deter: 200

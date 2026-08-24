@@ -1,3 +1,19 @@
+# R2R: Dense BF16 State-and-Gradient Replay
+
+R2R is an experimental fork of Recall2Imagine that keeps the MIMO world model,
+uniform replay sampler, objectives, optimizer, train ratio, and imagination
+settings intact while adding dense replay-aligned recurrent-state and boundary-
+adjoint caching. It uses a one-million-transition replay and matched learner
+shapes of `64x64`, `128x32`, `256x16`, and `1024x4` (`T x B`).
+
+The implementation is based on official Recall2Imagine commit
+`6e317e751ffd8f381e09476f3633567dff9f9234`. See
+[`docs/R2R_DESIGN.md`](docs/R2R_DESIGN.md) for the cache semantics and
+[`experiments/r2r/README.md`](experiments/r2r/README.md) for verification and
+gated experiment commands.
+
+## Upstream Recall2Imagine
+
 # Mastering Memory Tasks with World Models
 
 ---

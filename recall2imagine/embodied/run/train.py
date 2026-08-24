@@ -3,6 +3,7 @@ import re
 import embodied
 import numpy as np
 import jax
+from pathlib import Path
 
 
 def train(agent, env, replay, logger, args, config):
@@ -85,6 +86,8 @@ def train(agent, env, replay, logger, args, config):
         jax.profiler.start_trace(f"{args.profile_path}/{step.value}")
         print(f'profiling step {step}')
       outs, state[0], mets = agent.train(batch[0], state[0])
+      if hasattr(replay, 'update_cache'):
+        replay.update_cache(outs)
       if should_profile:
         jax.profiler.stop_trace()
       metrics.add(mets, prefix='train')
@@ -121,6 +124,11 @@ def train(agent, env, replay, logger, args, config):
       *args, mode='explore' if should_expl(step) else 'train')
   while step < args.steps:
     driver(policy, steps=100)
+    if embodied.run.requeue_requested():
+      checkpoint.save()
+      (Path(str(logdir)) / 'REQUEUE_READY').write_text(
+          'checkpoint and replay cache flushed after SIGUSR1\n')
+      raise SystemExit(75)
     if should_save(step):
       try:
         checkpoint.save()

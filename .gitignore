@@ -6,3 +6,10 @@ __pycache__/
 *.egg-info
 MUJOCO_LOG.TXT
 ;
+.containers/
+wandb/
+logs/
+logs_*/
+slurm-*.out
+experiments/r2r/results/
+experiments/r2r/*.out

@@ -140,7 +140,7 @@ def creating():
 
 
 @jax.named_scope('grad')
-def grad(fun, keys, has_aux=False):
+def grad(fun, keys, has_aux=False, input_argnums=()):
   """Compute the gradient of an impure function with respect to the specified
   state entries or modules. The transformed function returns a tuple containing
   the computed value, selected state entries, their gradients, and if
@@ -154,7 +154,14 @@ def grad(fun, keys, has_aux=False):
   def forward(x1, x2, rng, *args, **kwargs):
     (y, aux), state = fun({**x1, **x2}, rng, *args, create=False, **kwargs)
     return y, (aux, state)
-  backward = jax.value_and_grad(forward, has_aux=True)
+  input_argnums = tuple(input_argnums)
+  if input_argnums:
+    # forward arguments are x1, x2, rng, followed by the user arguments.
+    differentiated = (0,) + tuple(3 + index for index in input_argnums)
+    backward = jax.value_and_grad(
+        forward, argnums=differentiated, has_aux=True)
+  else:
+    backward = jax.value_and_grad(forward, has_aux=True)
   @functools.wraps(backward)
   def wrapper(*args, **kwargs):
     _prerun(fun, *args, **kwargs)
@@ -167,6 +174,11 @@ def grad(fun, keys, has_aux=False):
     x2 = {k: v for k, v in context().items() if k not in strs}
     (y, (aux, state)), dx = backward(x1, x2, rng(), *args, **kwargs)
     context().update(state)
+    if input_argnums:
+      param_dx, *input_dx = dx
+      if has_aux:
+        return y, x1, param_dx, aux, tuple(input_dx)
+      return y, x1, param_dx, tuple(input_dx)
     return (y, x1, dx, aux) if has_aux else (y, x1, dx)
   return wrapper
 

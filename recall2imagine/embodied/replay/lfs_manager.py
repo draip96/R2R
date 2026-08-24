@@ -77,7 +77,7 @@ class LFSManager:
     self.initializing = False
 
   def initialize(self, stripe_count=8, environment_step=None,
-                 length=1): 
+                 length=1, load_prefix=True):
     if not self.initialized:
       with self.lfs_lock:
         if not self.initialized:
@@ -99,7 +99,7 @@ class LFSManager:
           self.prefix_size_stripes = self.prefix_size_b // self.stripe_size_b
           self.total_chunks = total_buffer_size // self.stripe_size_b
           prealloc = False
-          needs_load = True
+          needs_load = bool(load_prefix)
           if self.use_lfs:
             os.makedirs(self.lfs_path, exist_ok=True)
             print('checking if LFS file exists!')
@@ -116,13 +116,14 @@ class LFSManager:
                 # being here means that there is a long term buffer 
                 # that we can take. Which means we should deserialize the 
                 # address table of the replay buffer which is done by the line below
-                needs_load = True
+                needs_load = bool(load_prefix)
                 print('copying done')
           else:
             prealloc = True 
           prealloc_tmp = not os.path.exists(self.tmp_file_path)
           if os.path.exists(self.tmp_file_path):
-            self.tmp_file = open(self.tmp_file_path, 'r+b')
+            if not hasattr(self, 'tmp_file') or self.tmp_file.closed:
+              self.tmp_file = open(self.tmp_file_path, 'r+b')
           else:
             self.tmp_file = open(self.tmp_file_path, 'w+b')
           if needs_load:
