@@ -167,6 +167,20 @@ reward-only cell must reproduce the earlier positive control, while the other
 three cells identify the smallest native auxiliary group that prevents cue
 acquisition. Replay sampling and all optimizer settings remain fixed.
 
+After the reward-only oracle passes and every auxiliary cell fails, promote the
+proven acquisition objective through the full agent with:
+
+```bash
+experiments/r2r/submit_toy_reward_only_promotion.sh
+```
+
+This runs matched 50k direct-BPTT and full-R2R arms at distance 8. Both train
+actor and critic normally; the world-model scalar is the balanced terminal
+reward objective that passed the acquisition audit. The full-R2R arm enables
+the dense BF16 state/adjoint cache, while the direct arm is cache-disabled.
+This is an explicit ToyMemory diagnostic profile, not the unchanged native R2I
+objective.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:

@@ -99,6 +99,11 @@ class R2RConfigTest(unittest.TestCase):
     self.assertFalse(balanced_aux['state_gradient_cache.enabled'])
     self.assertTrue(balanced_aux['toy_balanced_terminal_reward_with_aux'])
 
+    memory = self.config['toy_balanced_terminal_memory']
+    self.assertTrue(memory['toy_balanced_terminal_reward_with_aux'])
+    for key in ('dyn', 'rep', 'vector', 'cont'):
+      self.assertEqual(memory[f'loss_scales.{key}'], 0.0)
+
     reference = self.config['toy_r2i_reference']
     self.assertFalse(reference['run.toy_stop_on_success'])
     self.assertFalse(reference['state_gradient_cache.enabled'])

@@ -386,6 +386,16 @@ toy_balanced_terminal_aux_world_model:
   toy_balanced_terminal_reward_with_aux: True
   toy_arm: balanced_terminal_aux_world_model
 
+# Promoted ToyMemory acquisition objective. This is a diagnostic sparse-reward
+# profile: the model is optimized only by the exact balanced terminal reward
+# term, while actor and critic training remain enabled in full-agent runs.
+toy_balanced_terminal_memory:
+  toy_balanced_terminal_reward_with_aux: True
+  loss_scales.dyn: 0.0
+  loss_scales.rep: 0.0
+  loss_scales.vector: 0.0
+  loss_scales.cont: 0.0
+
 # Cache-disabled R2I learner shape for the matched distance-8 window control.
 toy_r2i_reference:
   run.toy_stop_on_success: False
