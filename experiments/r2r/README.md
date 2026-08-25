@@ -236,6 +236,21 @@ actor accuracy 1.0, model reward-choice accuracy 1.0, and finite model margin
 of at least 0.1, with the exact gate still passing at 50k. No replay, cache,
 optimizer, or sampling setting changes.
 
+If the cached distance-8 world model solves but its actor remains at chance at
+50k, continue that exact checkpoint and objective without changing any
+hyperparameter:
+
+```bash
+R2R_SOURCE_CAMPAIGN=CAMPAIGN \
+  experiments/r2r/submit_toy_cont_full_extend.sh
+```
+
+The default target is 100k cumulative interactions. Model, actor, critic,
+optimizers, RNG counters, uniform replay, and dense cache are restored; the
+durable T=64 mirror can replace at most one incomplete 64-row tail after a
+crash. The continuation records retention separately rather than treating more
+training as a hidden hyperparameter change.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:
