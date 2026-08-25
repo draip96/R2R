@@ -221,6 +221,21 @@ the preceding factorial. Direct BPTT is cache-off; full R2R uses the dense BF16
 state/adjoint cache. Actor-plus-model retention determines whether learned
 termination removes the repeated-reward imagination exploit.
 
+Only after the distance-8 full-R2R arm retains exact actor and model accuracy
+over five consecutive evaluation panels and is still solved at 50k, launch the
+same selected profile at distances 16 and 32:
+
+```bash
+R2R_SOURCE_CAMPAIGN=CAMPAIGN experiments/r2r/submit_toy_cont_distances.sh
+```
+
+Both jobs remain `T=64`, `B=64`, seed 0, and run the full 50k interactions.
+The submission gate rejects a transient solve, and each distance writes
+`ROBUST_SUCCESS` only after five consecutive balanced 128-episode panels have
+actor accuracy 1.0, model reward-choice accuracy 1.0, and finite model margin
+of at least 0.1, with the exact gate still passing at 50k. No replay, cache,
+optimizer, or sampling setting changes.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:
