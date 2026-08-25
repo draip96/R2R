@@ -90,6 +90,11 @@ class Agent(nj.Module):
     values = jnp.stack(values, axis=-1)
     return jnp.argmax(values, axis=-1), values
 
+  def model_reward_from_state(self, state):
+    """Return the reward-head mean for an observed posterior state."""
+    (latent, _), _, _ = state
+    return self.wm.heads['reward'](latent).mean()
+
   def actor_from_state(self, state):
     (latent, _), task_state, _ = state
     outputs, _ = self.task_behavior.policy(latent, task_state)
@@ -244,6 +249,13 @@ class WorldModel(nj.Module):
     state = last_latent, last_action
     metrics = self._metrics(data, dists, post, prior, losses, model_loss)
     loss = model_loss.mean()
+    if self.config.toy_terminal_reward_only:
+      if future_adjoint is not None:
+        raise ValueError(
+            'terminal-reward falsifier must not use cached adjoints')
+      loss, diagnostic_metrics = jaxutils.balanced_terminal_reward_loss(
+          losses['reward'], data['reward'], data['is_last'])
+      metrics.update(diagnostic_metrics)
     if future_adjoint is not None:
       # JAX's complex cotangent convention is paired with the non-conjugated
       # real inner product. A focused oracle test freezes this convention.

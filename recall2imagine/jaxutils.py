@@ -251,6 +251,32 @@ def balance_stats(dist, target, thres):
   )
 
 
+def balanced_terminal_reward_loss(loss, target, is_last):
+  """Equal-class mean loss over terminal +1 and -1 rewards only."""
+  target = target.astype(jnp.float32)
+  terminal = is_last.astype(bool)
+  positive = (terminal & (target > 0.5)).astype(jnp.float32)
+  negative = (terminal & (target < -0.5)).astype(jnp.float32)
+  positive_count = positive.sum()
+  negative_count = negative.sum()
+  positive_mean = (loss * positive).sum() / jnp.maximum(positive_count, 1.0)
+  negative_mean = (loss * negative).sum() / jnp.maximum(negative_count, 1.0)
+  positive_present = (positive_count > 0).astype(jnp.float32)
+  negative_present = (negative_count > 0).astype(jnp.float32)
+  class_count = positive_present + negative_present
+  balanced = (
+      positive_present * positive_mean + negative_present * negative_mean
+  ) / jnp.maximum(class_count, 1.0)
+  metrics = {
+      'terminal_reward_objective': balanced,
+      'terminal_reward_positive_loss': positive_mean,
+      'terminal_reward_negative_loss': negative_mean,
+      'terminal_reward_positive_count': positive_count,
+      'terminal_reward_negative_count': negative_count,
+  }
+  return balanced, metrics
+
+
 class Moments(nj.Module):
 
   def __init__(

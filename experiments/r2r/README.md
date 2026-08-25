@@ -77,6 +77,24 @@ well as the mean predicted reward margin between the correct and incorrect
 answer, so partial model learning remains visible below the 100% gate. These
 comparison arms do not stop early.
 
+## Reward-acquisition and R2I-window controls
+
+Run the balanced terminal-reward falsifier and cache-disabled R2I `1024x4`
+window control together:
+
+```bash
+experiments/r2r/submit_toy_controls.sh
+```
+
+Both arms use distance 8, seed 0, 4096 random-prefill transitions, uniform
+replay, train ratio 1024, 25,000 interactions, and exactly 5226 learner
+updates. The falsifier uses direct BPTT at `64x64`, collects random actions,
+and optimizes an equal-class mean over terminal +1/-1 reward rows only. It
+reports teacher-forced posterior reward accuracy separately from imagined
+one-step model choice. The R2I arm uses the native objective and full agent at
+`1024x4` with state-gradient caching disabled. The configured one-million-row
+replay differs from R2I's historical capacity but cannot bind in a 25k run.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:

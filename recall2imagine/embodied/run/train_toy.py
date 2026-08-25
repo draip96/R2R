@@ -24,6 +24,8 @@ def _balanced_evaluation(agent, env, episodes):
   reset_actions = []
   contexts = []
   query_states = []
+  terminal_states = []
+  terminal_rewards = []
   rewards = []
 
   def policy(obs, state):
@@ -39,6 +41,9 @@ def _balanced_evaluation(agent, env, episodes):
       model_values.append(np.asarray(values[0], np.float64))
       reset_actions.append(int(np.argmax(reset_outputs['action'][0])))
       query_states.append(next_state)
+    if bool(obs['is_last'][0]):
+      terminal_states.append(next_state)
+      terminal_rewards.append(float(obs['reward'][0]))
     return outputs, next_state
 
   driver = embodied.Driver(env)
@@ -53,12 +58,23 @@ def _balanced_evaluation(agent, env, episodes):
   if len(contexts) != episodes or not np.array_equal(
       contexts, np.arange(episodes, dtype=np.int32) % 2):
     raise RuntimeError('ToyMemory evaluation did not produce balanced contexts')
+  if len(terminal_states) != episodes:
+    raise RuntimeError('ToyMemory evaluation did not produce one terminal state')
   merged = jax.tree_util.tree_map(
       lambda *values: np.concatenate(values, axis=0), *query_states)
   order = np.arange(episodes, dtype=np.int32).reshape(-1, 2)[:, ::-1].reshape(-1)
   swapped = jax.tree_util.tree_map(lambda value: value[order], merged)
   opposite_actions = np.argmax(agent.actor_from_state(swapped), axis=-1)
   opposite_contexts = contexts[order]
+  terminal_merged = jax.tree_util.tree_map(
+      lambda *values: np.concatenate(values, axis=0), *terminal_states)
+  terminal_values = np.asarray(
+      agent.model_reward_from_state(terminal_merged), np.float64)
+  terminal_rewards = np.asarray(terminal_rewards, np.float64)
+  terminal_positive = terminal_rewards > 0.0
+  terminal_negative = terminal_rewards < 0.0
+  terminal_sign_correct = (
+      (terminal_values > 0.0) == terminal_positive)
   reward_values = np.asarray(rewards, np.float64)
   correct_values = model_values[np.arange(episodes), contexts]
   incorrect_values = model_values[np.arange(episodes), 1 - contexts]
@@ -73,6 +89,17 @@ def _balanced_evaluation(agent, env, episodes):
           correct_values - incorrect_values)),
       'model_reward_margin_std': float(np.std(
           correct_values - incorrect_values)),
+      'teacher_terminal_sign_accuracy': float(np.mean(
+          terminal_sign_correct)),
+      'teacher_terminal_positive_accuracy': float(np.mean(
+          terminal_values[terminal_positive] > 0.0)),
+      'teacher_terminal_negative_accuracy': float(np.mean(
+          terminal_values[terminal_negative] < 0.0)),
+      'teacher_terminal_value_margin': float(
+          terminal_values[terminal_positive].mean() -
+          terminal_values[terminal_negative].mean()),
+      'teacher_terminal_mae': float(np.mean(np.abs(
+          terminal_values - terminal_rewards))),
       'reset_state_accuracy': float(np.mean(reset_actions == contexts)),
       'opposite_cue_state_accuracy': float(
           np.mean(opposite_actions == opposite_contexts)),
@@ -88,16 +115,33 @@ def train_toy(
   logdir.mkdirs()
   episode_steps = int(config.task.split('_', 1)[1])
   cue_query_distance = episode_steps - 2
-  arm = ('world_model_only' if world_model_only else
-         'full_r2r' if config.state_gradient_cache.enabled else
-         'direct_bptt')
+  arm = str(config.toy_arm)
+  if arm == 'auto':
+    arm = ('world_model_only' if world_model_only else
+           'full_r2r' if config.state_gradient_cache.enabled else
+           'direct_bptt')
 
   def passed(evaluation):
+    if config.toy_terminal_reward_only:
+      return evaluation['teacher_terminal_sign_accuracy'] == 1.0
     if world_model_only:
       return evaluation['model_reward_choice_accuracy'] == 1.0
     return (
         evaluation['actor_accuracy'] == 1.0 and
         evaluation['model_reward_choice_accuracy'] == 1.0)
+
+  success_message = (
+      'teacher-forced terminal reward accuracy reached 100%\n'
+      if config.toy_terminal_reward_only else
+      'model reward-choice accuracy reached 100%\n'
+      if world_model_only else
+      'actor and model reward-choice accuracy reached 100%\n')
+  failure_message = (
+      '25k-step teacher-forced terminal reward gate was not reached\n'
+      if config.toy_terminal_reward_only else
+      '25k-step model reward-choice accuracy gate was not reached\n'
+      if world_model_only else
+      '25k-step actor-plus-model accuracy gate was not reached\n')
 
   should_expl = embodied.when.Until(args.expl_until)
   should_train = embodied.when.Ratio(args.train_ratio / args.batch_steps)
@@ -222,8 +266,10 @@ def train_toy(
         ever_success = True
         first_success_step = int(step)
       summary = {
-          'protocol': 'r2r-toy-memory-v2',
+          'protocol': 'r2r-toy-memory-v3',
           'arm': arm,
+          'objective': ('balanced_terminal_reward_only'
+                        if config.toy_terminal_reward_only else 'native'),
           'task': config.task,
           'episode_steps': episode_steps,
           'cue_query_distance': cue_query_distance,
@@ -240,10 +286,7 @@ def train_toy(
       _write_summary(logdir, summary)
       if success:
         checkpoint.save()
-        (Path(str(logdir)) / 'SUCCESS').write_text(
-            ('model reward-choice accuracy reached 100%\n'
-             if world_model_only else
-             'actor and model reward-choice accuracy reached 100%\n'))
+        (Path(str(logdir)) / 'SUCCESS').write_text(success_message)
         if args.toy_stop_on_success:
           return summary
       next_evaluation += evaluation_every
@@ -259,13 +302,12 @@ def train_toy(
     if success and not ever_success:
       ever_success = True
       first_success_step = int(step)
-      (Path(str(logdir)) / 'SUCCESS').write_text(
-          ('model reward-choice accuracy reached 100%\n'
-           if world_model_only else
-           'actor and model reward-choice accuracy reached 100%\n'))
+      (Path(str(logdir)) / 'SUCCESS').write_text(success_message)
   summary = {
-      'protocol': 'r2r-toy-memory-v2',
+      'protocol': 'r2r-toy-memory-v3',
       'arm': arm,
+      'objective': ('balanced_terminal_reward_only'
+                    if config.toy_terminal_reward_only else 'native'),
       'task': config.task,
       'episode_steps': episode_steps,
       'cue_query_distance': cue_query_distance,
@@ -282,10 +324,7 @@ def train_toy(
   _write_summary(logdir, summary)
   checkpoint.save()
   if not ever_success:
-    (Path(str(logdir)) / 'FAILED').write_text(
-        ('25k-step model reward-choice accuracy gate was not reached\n'
-         if world_model_only else
-         '25k-step actor-plus-model accuracy gate was not reached\n'))
+    (Path(str(logdir)) / 'FAILED').write_text(failure_message)
   return summary
 
 

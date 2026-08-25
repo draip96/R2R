@@ -106,6 +106,15 @@ class JAXAgent(embodied.Agent):
     outputs, _ = self._model_reward_choice(varibs, rng, state)
     return self._convert_outs(outputs, self.policy_devices)
 
+  def model_reward_from_state(self, state):
+    state = tree_map(
+        np.asarray, state, is_leaf=lambda x: isinstance(x, list))
+    state = self._convert_inps(state, self.policy_devices)
+    rng = self._next_rngs(self.policy_devices)
+    varibs = self.varibs if self.single_device else self.policy_varibs
+    outputs, _ = self._model_reward_from_state(varibs, rng, state)
+    return self._convert_outs(outputs, self.policy_devices)
+
   def actor_from_state(self, state):
     state = tree_map(
         np.asarray, state, is_leaf=lambda x: isinstance(x, list))
@@ -222,6 +231,8 @@ class JAXAgent(embodied.Agent):
     self._init_train = nj.pure(lambda x: self.agent.train_initial(len(x)))
     self._policy = nj.pure(self.agent.policy)
     self._model_reward_choice = nj.pure(self.agent.model_reward_choice)
+    self._model_reward_from_state = nj.pure(
+        self.agent.model_reward_from_state)
     self._actor_from_state = nj.pure(self.agent.actor_from_state)
     self._train = nj.pure(self.agent.train)
     self._report = nj.pure(self.agent.report)
@@ -241,6 +252,8 @@ class JAXAgent(embodied.Agent):
       self._policy = nj.jit(self._policy, static=['mode'], **kw)
       self._model_reward_choice = nj.jit(
           self._model_reward_choice, **kw)
+      self._model_reward_from_state = nj.jit(
+          self._model_reward_from_state, **kw)
       self._actor_from_state = nj.jit(self._actor_from_state, **kw)
     else:
       kw = dict(devices=self.policy_devices)
@@ -248,6 +261,8 @@ class JAXAgent(embodied.Agent):
       self._policy = nj.pmap(self._policy, 'i', static=['mode'], **kw)
       self._model_reward_choice = nj.pmap(
           self._model_reward_choice, 'i', **kw)
+      self._model_reward_from_state = nj.pmap(
+          self._model_reward_from_state, 'i', **kw)
       self._actor_from_state = nj.pmap(
           self._actor_from_state, 'i', **kw)
 

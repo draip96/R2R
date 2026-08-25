@@ -70,6 +70,24 @@ class R2RConfigTest(unittest.TestCase):
     self.assertFalse(cached['run.toy_stop_on_success'])
     self.assertNotIn('state_gradient_cache.enabled', cached)
 
+  def test_falsifier_and_r2i_window_controls_are_explicit(self):
+    defaults = self.config['defaults']
+    self.assertFalse(defaults['toy_terminal_reward_only'])
+    self.assertEqual(defaults['toy_arm'], 'auto')
+
+    falsifier = self.config['toy_terminal_reward_falsifier']
+    self.assertEqual(falsifier['task_behavior'], 'Random')
+    self.assertEqual(falsifier['run']['script'], 'train_toy_world_model')
+    self.assertFalse(falsifier['run']['toy_stop_on_success'])
+    self.assertFalse(falsifier['state_gradient_cache.enabled'])
+    self.assertTrue(falsifier['toy_terminal_reward_only'])
+    self.assertEqual(falsifier['toy_arm'], 'terminal_reward_falsifier')
+
+    reference = self.config['toy_r2i_reference']
+    self.assertFalse(reference['run.toy_stop_on_success'])
+    self.assertFalse(reference['state_gradient_cache.enabled'])
+    self.assertEqual(reference['toy_arm'], 'r2i_w1024')
+
 
 if __name__ == '__main__':
   unittest.main()
