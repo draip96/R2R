@@ -203,9 +203,10 @@ experiments/r2r/submit_toy_continuation_extend.sh
 ```
 
 The continuation preserves model/optimizer counters and the fixed evaluation
-grid. As with other LFS resumes, the durable mirror contains completed 1024-row
-chunks only: a 25k source therefore loses up to 424 partial-tail replay rows.
-The launcher records this qualification explicitly; replay remains uniform.
+grid. For these T=64 arms, the durable mirror contains completed 64-row chunks:
+a 25k source therefore restores through 24,960 and loses up to 40 partial-tail
+replay rows. The launcher records this qualification explicitly; replay remains
+uniform.
 
 ## Gated downstream campaign
 

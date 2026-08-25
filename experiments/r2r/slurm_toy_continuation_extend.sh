@@ -64,8 +64,8 @@ printf 'source_campaign=%s\narm=%s\nsource_steps=%s\ntarget_steps=%s\n' \
   > "${PROVENANCE}/continuation.txt"
 printf '%s\n' \
   'The checkpoint restores model, optimizer, counters, and RNG state at 25,000.' \
-  'The LFS replay mirror contains only completed 1024-row chunks through 24,576,' \
-  'so up to 424 partial-tail replay rows are replaced after resume. Sampling stays' \
+  'For T=64, the LFS replay mirror contains completed 64-row chunks through 24,960,' \
+  'so up to 40 partial-tail replay rows are replaced after resume. Sampling stays' \
   'uniform and unfiltered, but this continuation is not replay-bit-exact.' \
   > "${PROVENANCE}/resume-qualification.txt"
 export WANDB_MODE=offline
