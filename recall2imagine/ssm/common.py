@@ -41,7 +41,11 @@ def vector_operator_with_dones_initial(q_i, q_j):
     """
     A_i, b_i, _, d_i = q_i
     A_j, b_j, z_j, d_j = q_j
-    return A_j * A_i * (1 - d_j) + A_j * d_j, \
+    # A reset in the right segment makes the composed transform independent
+    # of everything before that reset. Keeping ``A_j`` here (the upstream R2I
+    # behavior) lets pre-reset state leak through whenever the scan tree later
+    # combines this segment with another one.
+    return A_j * A_i * (1 - d_j), \
            A_j * ((1 - d_j) * b_i + d_j * z_j) + b_j, \
            z_j, \
            (d_i + d_j).clip(0, 1)
@@ -230,7 +234,9 @@ def matrix_operator_with_dones_initial(q_i, q_j):
     """
     A_i, b_i, _, d_i = q_i
     A_j, b_j, z_j, d_j = q_j
-    return A_j @ A_i * (1 - d_j) + A_j * d_j, \
+    # See the diagonal operator above: after a reset, the composed affine
+    # transform must have zero dependence on its incoming state.
+    return A_j @ A_i * (1 - d_j), \
            A_j @ ((1 - d_j) * b_i + d_j * z_j) + b_j, \
            z_j, \
            (d_i + d_j).clip(0, 1)
@@ -376,13 +382,10 @@ def fast_scan(
     if dones is None:
         _, xs = jax.lax.associative_scan(operator_without_dones, (A, B))
     else:
-        if state_taps is None:
-            # Preserve the unmodified R2I path byte-for-byte when caching is
-            # disabled. R2R's tapped path aligns real reset flags with the
-            # synthetic leading x0 element so credit cannot cross episodes.
-            dones = np.insert(dones, -1, 0)
-        else:
-            dones = np.concatenate((np.zeros_like(dones[:1]), dones), axis=0)
+        # The first scan element is the synthetic incoming state x0, so it has
+        # no environment reset flag. Every real flag must remain aligned with
+        # its corresponding input step for both ordinary and tapped scans.
+        dones = np.concatenate((np.zeros_like(dones[:1]), dones), axis=0)
         zeros = np.repeat(np.expand_dims(init, 0), B.shape[0], 0)
         _, xs, zs, ds = jax.lax.associative_scan(operator_with_dones, (A, B, zeros, dones))
 

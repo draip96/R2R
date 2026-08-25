@@ -1,4 +1,4 @@
-"""Online ToyMemory training with a strict actor-plus-model early gate."""
+"""Online ToyMemory training and matched world-model diagnostics."""
 
 import json
 import re
@@ -20,6 +20,7 @@ def _write_summary(logdir, value):
 def _balanced_evaluation(agent, env, episodes):
   actor_actions = []
   model_choices = []
+  model_values = []
   reset_actions = []
   contexts = []
   query_states = []
@@ -30,11 +31,12 @@ def _balanced_evaluation(agent, env, episodes):
     if bool(obs['log_is_query'][0]):
       context = int(obs['log_context'][0])
       action = int(np.argmax(outputs['action'][0]))
-      model_choice, _ = agent.model_reward_choice(next_state)
+      model_choice, values = agent.model_reward_choice(next_state)
       reset_outputs, _ = agent.policy(obs, None, mode='eval')
       contexts.append(context)
       actor_actions.append(action)
       model_choices.append(int(model_choice[0]))
+      model_values.append(np.asarray(values[0], np.float64))
       reset_actions.append(int(np.argmax(reset_outputs['action'][0])))
       query_states.append(next_state)
     return outputs, next_state
@@ -46,6 +48,7 @@ def _balanced_evaluation(agent, env, episodes):
   contexts = np.asarray(contexts, np.int32)
   actor_actions = np.asarray(actor_actions, np.int32)
   model_choices = np.asarray(model_choices, np.int32)
+  model_values = np.asarray(model_values, np.float64)
   reset_actions = np.asarray(reset_actions, np.int32)
   if len(contexts) != episodes or not np.array_equal(
       contexts, np.arange(episodes, dtype=np.int32) % 2):
@@ -55,25 +58,47 @@ def _balanced_evaluation(agent, env, episodes):
   order = np.arange(episodes, dtype=np.int32).reshape(-1, 2)[:, ::-1].reshape(-1)
   swapped = jax.tree_util.tree_map(lambda value: value[order], merged)
   opposite_actions = np.argmax(agent.actor_from_state(swapped), axis=-1)
+  opposite_contexts = contexts[order]
   reward_values = np.asarray(rewards, np.float64)
+  correct_values = model_values[np.arange(episodes), contexts]
+  incorrect_values = model_values[np.arange(episodes), 1 - contexts]
   return {
       'episodes': int(episodes),
       'actor_accuracy': float(np.mean(actor_actions == contexts)),
       'model_reward_choice_accuracy': float(
           np.mean(model_choices == contexts)),
+      'model_reward_correct_value': float(np.mean(correct_values)),
+      'model_reward_incorrect_value': float(np.mean(incorrect_values)),
+      'model_reward_margin': float(np.mean(
+          correct_values - incorrect_values)),
+      'model_reward_margin_std': float(np.std(
+          correct_values - incorrect_values)),
       'reset_state_accuracy': float(np.mean(reset_actions == contexts)),
       'opposite_cue_state_accuracy': float(
-          np.mean(opposite_actions == contexts)),
+          np.mean(opposite_actions == opposite_contexts)),
       'mean_reward': float(reward_values.mean()),
       'finite': bool(np.isfinite(reward_values).all()),
   }
 
 
-def train_toy(agent, env, eval_env, replay, logger, args, config):
+def train_toy(
+    agent, env, eval_env, replay, logger, args, config,
+    world_model_only=False):
   logdir = embodied.Path(args.logdir)
   logdir.mkdirs()
   episode_steps = int(config.task.split('_', 1)[1])
   cue_query_distance = episode_steps - 2
+  arm = ('world_model_only' if world_model_only else
+         'full_r2r' if config.state_gradient_cache.enabled else
+         'direct_bptt')
+
+  def passed(evaluation):
+    if world_model_only:
+      return evaluation['model_reward_choice_accuracy'] == 1.0
+    return (
+        evaluation['actor_accuracy'] == 1.0 and
+        evaluation['model_reward_choice_accuracy'] == 1.0)
+
   should_expl = embodied.when.Until(args.expl_until)
   should_train = embodied.when.Ratio(args.train_ratio / args.batch_steps)
   should_log = embodied.when.Clock(args.log_every)
@@ -166,14 +191,18 @@ def train_toy(agent, env, eval_env, replay, logger, args, config):
   # durable summary advances the grid instead of shifting it by another 1000.
   summary_path = Path(str(logdir)) / 'toy_summary.json'
   if summary_path.exists():
-    last_evaluation = int(json.loads(
-        summary_path.read_text())['environment_steps'])
-    next_evaluation = last_evaluation + evaluation_every
+    previous_summary = json.loads(summary_path.read_text())
+    last_evaluation_step = int(previous_summary['environment_steps'])
+    next_evaluation = last_evaluation_step + evaluation_every
   else:
+    previous_summary = {}
+    last_evaluation_step = None
     next_evaluation = int(fill) + evaluation_every
   started = time.time()
-  final_evaluation = None
-  success = False
+  final_evaluation = previous_summary.get('evaluation')
+  success = bool(final_evaluation and passed(final_evaluation))
+  ever_success = bool(previous_summary.get('ever_success', False))
+  first_success_step = previous_summary.get('first_success_step')
   while step < args.steps:
     remaining = min(100, int(args.steps - step), next_evaluation - int(step))
     driver(policy, steps=max(1, remaining))
@@ -185,13 +214,16 @@ def train_toy(agent, env, eval_env, replay, logger, args, config):
     if int(step) >= next_evaluation:
       final_evaluation = _balanced_evaluation(
           agent, eval_env, int(args.toy_eval_episodes))
+      last_evaluation_step = int(step)
       logger.add(final_evaluation, prefix='toy_eval')
       logger.write(fps=True)
-      success = (
-          final_evaluation['actor_accuracy'] == 1.0 and
-          final_evaluation['model_reward_choice_accuracy'] == 1.0)
+      success = passed(final_evaluation)
+      if success and not ever_success:
+        ever_success = True
+        first_success_step = int(step)
       summary = {
-          'protocol': 'r2r-toy-memory-v1',
+          'protocol': 'r2r-toy-memory-v2',
+          'arm': arm,
           'task': config.task,
           'episode_steps': episode_steps,
           'cue_query_distance': cue_query_distance,
@@ -201,23 +233,39 @@ def train_toy(agent, env, eval_env, replay, logger, args, config):
           'learner_updates': int(updates),
           'evaluation': final_evaluation,
           'success': bool(success),
+          'ever_success': bool(ever_success),
+          'first_success_step': first_success_step,
           'elapsed_seconds': time.time() - started,
       }
       _write_summary(logdir, summary)
       if success:
         checkpoint.save()
         (Path(str(logdir)) / 'SUCCESS').write_text(
-            'actor and model reward-choice accuracy reached 100%\n')
-        return summary
+            ('model reward-choice accuracy reached 100%\n'
+             if world_model_only else
+             'actor and model reward-choice accuracy reached 100%\n'))
+        if args.toy_stop_on_success:
+          return summary
       next_evaluation += evaluation_every
     if should_save(step):
       checkpoint.save()
 
-  if final_evaluation is None:
+  if last_evaluation_step != int(step):
     final_evaluation = _balanced_evaluation(
         agent, eval_env, int(args.toy_eval_episodes))
+    logger.add(final_evaluation, prefix='toy_eval')
+    logger.write(fps=True)
+    success = passed(final_evaluation)
+    if success and not ever_success:
+      ever_success = True
+      first_success_step = int(step)
+      (Path(str(logdir)) / 'SUCCESS').write_text(
+          ('model reward-choice accuracy reached 100%\n'
+           if world_model_only else
+           'actor and model reward-choice accuracy reached 100%\n'))
   summary = {
-      'protocol': 'r2r-toy-memory-v1',
+      'protocol': 'r2r-toy-memory-v2',
+      'arm': arm,
       'task': config.task,
       'episode_steps': episode_steps,
       'cue_query_distance': cue_query_distance,
@@ -226,11 +274,23 @@ def train_toy(agent, env, eval_env, replay, logger, args, config):
       'environment_steps': int(step),
       'learner_updates': int(updates),
       'evaluation': final_evaluation,
-      'success': False,
+      'success': bool(success),
+      'ever_success': bool(ever_success),
+      'first_success_step': first_success_step,
       'elapsed_seconds': time.time() - started,
   }
   _write_summary(logdir, summary)
   checkpoint.save()
-  (Path(str(logdir)) / 'FAILED').write_text(
-      '25k-step actor-plus-model accuracy gate was not reached\n')
+  if not ever_success:
+    (Path(str(logdir)) / 'FAILED').write_text(
+        ('25k-step model reward-choice accuracy gate was not reached\n'
+         if world_model_only else
+         '25k-step actor-plus-model accuracy gate was not reached\n'))
   return summary
+
+
+def train_toy_world_model(agent, env, eval_env, replay, logger, args, config):
+  """Train only the world model while collecting uniformly random actions."""
+  return train_toy(
+      agent, env, eval_env, replay, logger, args, config,
+      world_model_only=True)

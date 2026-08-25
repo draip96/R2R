@@ -180,7 +180,7 @@ class RSSM(nj.Module):
     post = {'stoch': stoch, 'deter': prior['deter'], 'hidden': prior['hidden'], **stats}
     return cast(post), cast(prior)
 
-  def img_step(self, prev_state, prev_action):
+  def img_step(self, prev_state, prev_action, sample=True):
     prev_stoch = prev_state['stoch']
     prev_action = cast(prev_action)
     if self._action_clip > 0.0:
@@ -198,7 +198,7 @@ class RSSM(nj.Module):
     x = self.get('img_out', Linear, **self._kw)(x)
     stats = self._stats('img_stats', x)
     dist = self.get_dist(stats)
-    stoch = dist.sample(seed=nj.rng())
+    stoch = dist.sample(seed=nj.rng()) if sample else dist.mode()
     prior = {'stoch': stoch, **outs, **stats}
     return cast(prior)
 

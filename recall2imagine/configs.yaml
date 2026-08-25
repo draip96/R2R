@@ -40,6 +40,7 @@ defaults:
     eval_samples: 1
     toy_eval_every: 1000
     toy_eval_episodes: 128
+    toy_stop_on_success: True
     bsuite_eval_episodes: 1000
     train_ratio: 32.0
     train_fill: 0
@@ -328,6 +329,22 @@ toy_distance32:
 
 toy_distance64:
   task: toymemory_66
+
+# Matched distance-8 diagnostic arms. All three retain T=64, B=64, the same
+# uniform replay, 4096-step prefill, update ratio, and 25k interaction budget.
+toy_world_model_only:
+  task_behavior: Random
+  run:
+    script: train_toy_world_model
+    toy_stop_on_success: False
+  state_gradient_cache.enabled: False
+
+toy_direct_bptt:
+  run.toy_stop_on_success: False
+  state_gradient_cache.enabled: False
+
+toy_full_r2r:
+  run.toy_stop_on_success: False
 
 tiny:
   rssm.deter: 200

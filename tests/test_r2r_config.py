@@ -51,6 +51,25 @@ class R2RConfigTest(unittest.TestCase):
     for preset, task in expected.items():
       self.assertEqual(self.config[preset], {'task': task})
 
+  def test_matched_toy_arms_have_one_mechanism_difference(self):
+    defaults = self.config['defaults']
+    self.assertEqual(int(defaults['run']['steps']), 10_000_000_000)
+    self.assertTrue(defaults['run']['toy_stop_on_success'])
+
+    world_model = self.config['toy_world_model_only']
+    self.assertEqual(world_model['task_behavior'], 'Random')
+    self.assertEqual(world_model['run']['script'], 'train_toy_world_model')
+    self.assertFalse(world_model['run']['toy_stop_on_success'])
+    self.assertFalse(world_model['state_gradient_cache.enabled'])
+
+    direct = self.config['toy_direct_bptt']
+    self.assertFalse(direct['run.toy_stop_on_success'])
+    self.assertFalse(direct['state_gradient_cache.enabled'])
+
+    cached = self.config['toy_full_r2r']
+    self.assertFalse(cached['run.toy_stop_on_success'])
+    self.assertNotIn('state_gradient_cache.enabled', cached)
+
 
 if __name__ == '__main__':
   unittest.main()

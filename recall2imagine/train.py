@@ -93,6 +93,17 @@ def main(argv=None):
       embodied.run.train_toy(
           agent, env, eval_env, replay, logger, args, config)
 
+    elif args.script == 'train_toy_world_model':
+      replay = make_replay(config, replay_dir)
+      env = make_envs(config)
+      eval_env = make_envs(
+          config, seed=config.seed + 10_000_019, balanced=True)
+      cleanup += [env, eval_env]
+      agent = agt.Agent(env.obs_space, env.act_space, step, config)
+      replay.set_agent(agent)
+      embodied.run.train_toy_world_model(
+          agent, env, eval_env, replay, logger, args, config)
+
     elif args.script == 'train_bsuite':
       replay = make_replay(config, replay_dir)
       env = make_envs(config)

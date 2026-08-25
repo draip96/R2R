@@ -60,6 +60,23 @@ ToyMemory runs. ToyMemory's terminal transition follows the query, so these
 distances correspond to episode sizes 10, 18, 34, and 66 respectively. The
 first three dependencies fit inside the learner window; distance 64 does not.
 
+## Matched distance-8 mechanism comparison
+
+After changing learner/reset semantics, run all three controls for the full
+25,000-step budget from one pushed commit:
+
+```bash
+experiments/r2r/submit_toy_compare.sh
+```
+
+The array contains a random-policy world-model-only arm, a full-agent direct
+BPTT arm, and the full-agent BF16 state-adjoint R2R arm. All use seed 0,
+distance 8, `T=64`, `B=64`, 4096 random-prefill transitions, uniform replay,
+and train ratio 1024. Evaluation reports deterministic-prior reward choices as
+well as the mean predicted reward margin between the correct and incorrect
+answer, so partial model learning remains visible below the 100% gate. These
+comparison arms do not stop early.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:

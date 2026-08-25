@@ -82,7 +82,10 @@ class Agent(nj.Module):
       action = jax.nn.one_hot(
           jnp.full((len(latent['stoch']),), index, jnp.int32),
           self.act_space.shape[0])
-      successor = self.wm.rssm.img_step(latent, action)
+      # Compare actions under the same deterministic prior statistic. Sampling
+      # each branch independently makes this diagnostic largely measure prior
+      # RNG noise instead of whether the reward model learned the answer.
+      successor = self.wm.rssm.img_step(latent, action, sample=False)
       values.append(self.wm.heads['reward'](successor).mean())
     values = jnp.stack(values, axis=-1)
     return jnp.argmax(values, axis=-1), values
