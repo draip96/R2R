@@ -120,6 +120,13 @@ is `loss_scales.reward: 10`; it runs distance 8 for 50,000 interactions and
 11,476 learner updates. It is a diagnostic gate before testing the same scale
 with the actor or state-gradient cache.
 
+If reward scale 10 remains at chance through 50k, run the predeclared next
+single-variable value with:
+
+```bash
+R2R_REWARD_SCALE=32 experiments/r2r/submit_toy_reward10_wm.sh
+```
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:
