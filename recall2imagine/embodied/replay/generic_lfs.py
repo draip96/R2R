@@ -472,6 +472,17 @@ class FIFO_LFS:
     self.load()
 
   def load(self, data=None):
+    if data is not None:
+      # Checkpoint.load() restores `step` and agent weights before replay.
+      # Deserializing the checkpointed replay table here must not reload the
+      # older LFS-prefix agent or round the shared step back to a chunk
+      # boundary. The prefix path below remains the standalone restore path
+      # used by maybe_restore() before a checkpoint is loaded.
+      self.deserialize(data)
+      print(
+          'replay deserialized from checkpoint! The current offset is '
+          f'{self.manager.offset}')
+      return True
     ret = self.manager.read_prefix()
     if len(ret) != 2:
       return False

@@ -16,6 +16,6 @@ mkdir -p "${CONTINUATION}"
 job=$(sbatch --parsable \
   --export=ALL,R2R_SOURCE_CAMPAIGN="${SOURCE_CAMPAIGN}",R2R_TARGET_STEPS="${TARGET_STEPS}" \
   experiments/r2r/slurm_toy_r2i_long.sh)
-printf '%s\n' "${job}" > "${CONTINUATION}/job.txt"
+printf '%s\n' "${job}" > "${CONTINUATION}/job-${job}.txt"
 printf 'source_campaign=%s target_steps=%s job=%s\n' \
   "${SOURCE_CAMPAIGN}" "${TARGET_STEPS}" "${job}"

@@ -207,7 +207,7 @@ class ReplaySelectionParityTest(unittest.TestCase):
           'terminal_generations': np.empty((0,), np.int32),
       }
       first.cache.commit(payload)
-      first.save()
+      checkpoint_table = first.save()
       first.cache.close()
       first.manager.tmp_file.close()
       first.manager.lfs_file.close()
@@ -223,6 +223,15 @@ class ReplaySelectionParityTest(unittest.TestCase):
       self.assertEqual(len(restored), 12)
       self.assertEqual(restored_agent.step.value, 12)
       self.assertEqual(int(restored_agent.loaded['weight'][0]), 17)
+      # A subsequent generic Checkpoint restore has already loaded its newer
+      # step and agent weights. Replay.load(checkpoint_table) must restore only
+      # replay metadata instead of clobbering those values with the LFS prefix.
+      restored_agent.step.load(13)
+      restored_agent.loaded = {'weight': np.asarray([23], np.int32)}
+      self.assertTrue(restored.load(checkpoint_table))
+      self.assertEqual(restored_agent.step.value, 13)
+      self.assertEqual(int(restored_agent.loaded['weight'][0]), 23)
+      self.assertEqual(len(restored), 12)
       gathered = restored.cache.gather_boundaries(
           np.asarray([5]), np.asarray([0]),
           np.asarray([5]), np.asarray([0]))
