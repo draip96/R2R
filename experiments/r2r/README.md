@@ -195,6 +195,18 @@ features so it cannot erase cue memory. This distinguishes whether continuation
 can be restored faithfully or requires gradient isolation before another
 full-agent promotion.
 
+If either 25k continuation cell is still pre-transition, extend both existing
+checkpoints to 50k with:
+
+```bash
+experiments/r2r/submit_toy_continuation_extend.sh
+```
+
+The continuation preserves model/optimizer counters and the fixed evaluation
+grid. As with other LFS resumes, the durable mirror contains completed 1024-row
+chunks only: a 25k source therefore loses up to 424 partial-tail replay rows.
+The launcher records this qualification explicitly; replay remains uniform.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:
