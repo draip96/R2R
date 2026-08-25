@@ -44,6 +44,24 @@ class RewardFalsifierTest(unittest.TestCase):
     self.assertEqual(float(value), 3.0)
     self.assertEqual(float(metrics['terminal_reward_negative_count']), 0.0)
 
+  def test_terminal_weighting_preserves_mean_weight(self):
+    losses = jnp.asarray([[1.0, 2.0, 3.0, 4.0]])
+    is_last = jnp.asarray([[0, 0, 0, 1]], bool)
+    value, metrics = jaxutils.normalized_terminal_reward_loss(
+        losses, is_last, 3.0)
+    # Raw weights [1, 1, 1, 3] are divided by their mean of 1.5.
+    np.testing.assert_allclose(
+        np.asarray(value), np.asarray([[2 / 3, 4 / 3, 2, 8]]))
+    self.assertAlmostEqual(float(metrics['terminal_reward_mean_weight']), 1.5)
+    self.assertAlmostEqual(float(metrics['terminal_reward_row_rate']), 0.25)
+
+  def test_terminal_weight_one_is_exact_identity(self):
+    losses = jnp.asarray([[1.0, 2.0], [3.0, 4.0]])
+    is_last = jnp.asarray([[0, 1], [1, 0]], bool)
+    value, _ = jaxutils.normalized_terminal_reward_loss(
+        losses, is_last, 1.0)
+    np.testing.assert_array_equal(np.asarray(value), np.asarray(losses))
+
 
 if __name__ == '__main__':
   unittest.main()

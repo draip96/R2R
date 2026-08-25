@@ -277,6 +277,23 @@ def balanced_terminal_reward_loss(loss, target, is_last):
   return balanced, metrics
 
 
+def normalized_terminal_reward_loss(loss, is_last, terminal_weight):
+  """Upweight terminal rows without changing the reward loss mean scale."""
+  terminal_weight = jnp.asarray(terminal_weight, jnp.float32)
+  weights = jnp.where(
+      is_last.astype(bool), terminal_weight, jnp.ones((), jnp.float32))
+  mean_weight = weights.mean()
+  normalized = weights / jnp.maximum(mean_weight, 1e-8)
+  weighted_loss = loss * normalized
+  metrics = {
+      'terminal_reward_weight': terminal_weight,
+      'terminal_reward_row_rate': is_last.astype(jnp.float32).mean(),
+      'terminal_reward_mean_weight': mean_weight,
+      'terminal_reward_weighted_loss': weighted_loss.mean(),
+  }
+  return weighted_loss, metrics
+
+
 class Moments(nj.Module):
 
   def __init__(

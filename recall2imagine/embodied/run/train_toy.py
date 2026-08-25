@@ -124,6 +124,12 @@ def train_toy(
     arm = ('world_model_only' if world_model_only else
            'full_r2r' if config.state_gradient_cache.enabled else
            'direct_bptt')
+  objective = (
+      'balanced_terminal_reward_only'
+      if config.toy_terminal_reward_only else
+      'normalized_terminal_weighted_reward'
+      if float(config.toy_terminal_reward_weight) != 1.0 else
+      'native')
 
   def passed(evaluation):
     if config.toy_terminal_reward_only:
@@ -281,8 +287,8 @@ def train_toy(
       summary = {
           'protocol': 'r2r-toy-memory-v3',
           'arm': arm,
-          'objective': ('balanced_terminal_reward_only'
-                        if config.toy_terminal_reward_only else 'native'),
+          'objective': objective,
+          'terminal_reward_weight': float(config.toy_terminal_reward_weight),
           'task': config.task,
           'episode_steps': episode_steps,
           'cue_query_distance': cue_query_distance,
@@ -320,8 +326,8 @@ def train_toy(
   summary = {
       'protocol': 'r2r-toy-memory-v3',
       'arm': arm,
-      'objective': ('balanced_terminal_reward_only'
-                    if config.toy_terminal_reward_only else 'native'),
+      'objective': objective,
+      'terminal_reward_weight': float(config.toy_terminal_reward_weight),
       'task': config.task,
       'episode_steps': episode_steps,
       'cue_query_distance': cue_query_distance,

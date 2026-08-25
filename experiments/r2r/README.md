@@ -127,6 +127,20 @@ single-variable value with:
 R2R_REWARD_SCALE=32 experiments/r2r/submit_toy_reward10_wm.sh
 ```
 
+If both global reward-scale probes remain at chance, run the targeted
+rare-terminal-row probe with:
+
+```bash
+experiments/r2r/submit_toy_terminal_weight_wm.sh
+```
+
+This launches normalized terminal weights 10 and 100 as separate seed-0
+world-model-only arms. Both retain uniform replay and every native R2I
+world-model term. Only the relative weighting of terminal versus nonterminal
+rows inside the reward loss changes; normalization keeps the mean reward-loss
+weight at one. These remain diagnostic acquisition arms, not production R2R
+defaults.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:

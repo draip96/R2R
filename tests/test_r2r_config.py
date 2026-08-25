@@ -73,6 +73,7 @@ class R2RConfigTest(unittest.TestCase):
   def test_falsifier_and_r2i_window_controls_are_explicit(self):
     defaults = self.config['defaults']
     self.assertFalse(defaults['toy_terminal_reward_only'])
+    self.assertEqual(defaults['toy_terminal_reward_weight'], 1.0)
     self.assertEqual(defaults['toy_arm'], 'auto')
 
     falsifier = self.config['toy_terminal_reward_falsifier']
@@ -82,6 +83,13 @@ class R2RConfigTest(unittest.TestCase):
     self.assertFalse(falsifier['state_gradient_cache.enabled'])
     self.assertTrue(falsifier['toy_terminal_reward_only'])
     self.assertEqual(falsifier['toy_arm'], 'terminal_reward_falsifier')
+
+    weighted = self.config['toy_terminal_weighted_world_model']
+    self.assertEqual(weighted['task_behavior'], 'Random')
+    self.assertEqual(weighted['run']['script'], 'train_toy_world_model')
+    self.assertFalse(weighted['run']['toy_stop_on_success'])
+    self.assertFalse(weighted['state_gradient_cache.enabled'])
+    self.assertEqual(weighted['toy_arm'], 'terminal_weighted_world_model')
 
     reference = self.config['toy_r2i_reference']
     self.assertFalse(reference['run.toy_stop_on_success'])

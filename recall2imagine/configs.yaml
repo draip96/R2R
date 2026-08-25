@@ -77,6 +77,7 @@ defaults:
   unlocked_sampling: False
   state_gradient_cache: {enabled: True, storage_dtype: bfloat16}
   toy_terminal_reward_only: False
+  toy_terminal_reward_weight: 1.0
   toy_arm: auto
 
   # World Model
@@ -359,6 +360,19 @@ toy_terminal_reward_falsifier:
   state_gradient_cache.enabled: False
   toy_terminal_reward_only: True
   toy_arm: terminal_reward_falsifier
+
+# Acquisition diagnostic that keeps every native world-model loss and uniform
+# replay sampling, but changes the relative reward-row weighting. The weighted
+# reward loss is normalized back to unit mean weight, so this does not also
+# change the aggregate reward-loss scale. The concrete weight is supplied by
+# the launcher and is intentionally not a production default.
+toy_terminal_weighted_world_model:
+  task_behavior: Random
+  run:
+    script: train_toy_world_model
+    toy_stop_on_success: False
+  state_gradient_cache.enabled: False
+  toy_arm: terminal_weighted_world_model
 
 # Cache-disabled R2I learner shape for the matched distance-8 window control.
 toy_r2i_reference:

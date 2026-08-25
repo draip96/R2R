@@ -240,7 +240,21 @@ class WorldModel(nj.Module):
       loss = -dist.log_prob(data[key].astype(jnp.float32))
       assert loss.shape == embed.shape[:2], (key, loss.shape)
       losses[key] = loss
-    scaled = {k: v * self.scales[k] for k, v in losses.items()}
+    objective_losses = losses
+    diagnostic_metrics = {}
+    terminal_weight = float(self.config.toy_terminal_reward_weight)
+    if terminal_weight != 1.0:
+      if terminal_weight < 1.0:
+        raise ValueError('toy_terminal_reward_weight must be at least 1')
+      if self.config.toy_terminal_reward_only:
+        raise ValueError(
+            'terminal weighting and terminal-only falsifier are exclusive')
+      weighted_reward, diagnostic_metrics = (
+          jaxutils.normalized_terminal_reward_loss(
+              losses['reward'], data['is_last'], terminal_weight))
+      objective_losses = dict(losses)
+      objective_losses['reward'] = weighted_reward
+    scaled = {k: v * self.scales[k] for k, v in objective_losses.items()}
     model_loss = sum(scaled.values())
     out = {'embed':  embed, 'post': post, 'prior': prior}
     out.update({f'{k}_loss': v for k, v in losses.items()})
@@ -248,6 +262,7 @@ class WorldModel(nj.Module):
     last_action = data['action'][:, -1]
     state = last_latent, last_action
     metrics = self._metrics(data, dists, post, prior, losses, model_loss)
+    metrics.update(diagnostic_metrics)
     loss = model_loss.mean()
     if self.config.toy_terminal_reward_only:
       if future_adjoint is not None:
