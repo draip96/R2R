@@ -107,6 +107,19 @@ keeps the original JSONL history, records separate continuation provenance,
 and reports the cumulative expected 23,976 learner updates. Override
 `R2R_SOURCE_CAMPAIGN` or `R2R_TARGET_STEPS` when resuming another campaign.
 
+If native reward acquisition remains at chance, run the first minimal
+acquisition probe with:
+
+```bash
+experiments/r2r/submit_toy_reward10_wm.sh
+```
+
+This keeps the native world-model loss, uniform replay, `64x64` batch shape,
+random behavior, optimizers, and train ratio fixed. Its sole scientific change
+is `loss_scales.reward: 10`; it runs distance 8 for 50,000 interactions and
+11,476 learner updates. It is a diagnostic gate before testing the same scale
+with the actor or state-gradient cache.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:
