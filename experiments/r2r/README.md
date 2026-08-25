@@ -181,6 +181,20 @@ the dense BF16 state/adjoint cache, while the direct arm is cache-disabled.
 This is an explicit ToyMemory diagnostic profile, not the unchanged native R2I
 objective.
 
+If the reward-only world model learns but the actor exploits repeated imagined
+post-query rewards, audit continuation training with:
+
+```bash
+experiments/r2r/submit_toy_continuation_audit.sh
+```
+
+Both 25k world-model-only cells retain the proven balanced reward objective and
+restore only the continuation loss. `cont_shared` uses the native shared-core
+gradient; `cont_detached` trains the same continuation head on stop-gradient
+features so it cannot erase cue memory. This distinguishes whether continuation
+can be restored faithfully or requires gradient isolation before another
+full-agent promotion.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:

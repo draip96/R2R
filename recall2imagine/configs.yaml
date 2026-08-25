@@ -396,6 +396,24 @@ toy_balanced_terminal_memory:
   loss_scales.vector: 0.0
   loss_scales.cont: 0.0
 
+# Continuation-head repair audit. The shared arm uses the native gradient path;
+# the detached arm still trains the continuation head but prevents that
+# auxiliary loss from shaping the recurrent memory representation.
+toy_balanced_terminal_cont_world_model:
+  task_behavior: Random
+  run:
+    script: train_toy_world_model
+    toy_stop_on_success: False
+  state_gradient_cache.enabled: False
+  toy_balanced_terminal_reward_with_aux: True
+  loss_scales.dyn: 0.0
+  loss_scales.rep: 0.0
+  loss_scales.vector: 0.0
+  loss_scales.cont: 1.0
+
+toy_detached_aux_heads:
+  grad_heads: [reward]
+
 # Cache-disabled R2I learner shape for the matched distance-8 window control.
 toy_r2i_reference:
   run.toy_stop_on_success: False
