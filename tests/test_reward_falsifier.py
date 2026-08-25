@@ -62,6 +62,26 @@ class RewardFalsifierTest(unittest.TestCase):
         losses, is_last, 1.0)
     np.testing.assert_array_equal(np.asarray(value), np.asarray(losses))
 
+  def test_balanced_reward_replaces_native_reward_and_keeps_auxiliaries(self):
+    reward_losses = jnp.asarray([[2.0, 4.0]])
+    rewards = jnp.asarray([[1.0, -1.0]])
+    is_last = jnp.asarray([[1, 1]], bool)
+    scaled = {
+        'reward': reward_losses * 999.0,
+        'observation': jnp.asarray([[2.0, 4.0]]),
+        'dyn': jnp.asarray([[1.0, 3.0]]),
+    }
+    value, metrics = (
+        jaxutils.balanced_terminal_reward_with_auxiliary_loss(
+            scaled, reward_losses, rewards, is_last, 2.0))
+    # Auxiliary means are 3 + 2, balanced reward is 3, and reward scale is 2.
+    self.assertEqual(float(value), 11.0)
+    self.assertEqual(float(metrics['terminal_reward_auxiliary_loss']), 5.0)
+    gradient = jax.grad(lambda loss: (
+        jaxutils.balanced_terminal_reward_with_auxiliary_loss(
+            scaled, loss, rewards, is_last, 2.0)[0]))(reward_losses)
+    np.testing.assert_array_equal(np.asarray(gradient), [[1.0, 1.0]])
+
 
 if __name__ == '__main__':
   unittest.main()

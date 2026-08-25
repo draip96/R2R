@@ -264,6 +264,16 @@ class WorldModel(nj.Module):
     metrics = self._metrics(data, dists, post, prior, losses, model_loss)
     metrics.update(diagnostic_metrics)
     loss = model_loss.mean()
+    if self.config.toy_balanced_terminal_reward_with_aux:
+      if self.config.toy_terminal_reward_only or terminal_weight != 1.0:
+        raise ValueError(
+            'balanced terminal reward with auxiliaries is exclusive with '
+            'other toy reward objectives')
+      loss, diagnostic_metrics = (
+          jaxutils.balanced_terminal_reward_with_auxiliary_loss(
+              scaled, losses['reward'], data['reward'], data['is_last'],
+              self.scales['reward']))
+      metrics.update(diagnostic_metrics)
     if self.config.toy_terminal_reward_only:
       if future_adjoint is not None:
         raise ValueError(

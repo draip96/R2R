@@ -127,6 +127,8 @@ def train_toy(
   objective = (
       'balanced_terminal_reward_only'
       if config.toy_terminal_reward_only else
+      'balanced_terminal_reward_with_native_auxiliaries'
+      if config.toy_balanced_terminal_reward_with_aux else
       'normalized_terminal_weighted_reward'
       if float(config.toy_terminal_reward_weight) != 1.0 else
       'native')
@@ -289,6 +291,8 @@ def train_toy(
           'arm': arm,
           'objective': objective,
           'terminal_reward_weight': float(config.toy_terminal_reward_weight),
+          'balanced_terminal_reward_with_aux': bool(
+              config.toy_balanced_terminal_reward_with_aux),
           'task': config.task,
           'episode_steps': episode_steps,
           'cue_query_distance': cue_query_distance,
@@ -328,6 +332,8 @@ def train_toy(
       'arm': arm,
       'objective': objective,
       'terminal_reward_weight': float(config.toy_terminal_reward_weight),
+      'balanced_terminal_reward_with_aux': bool(
+          config.toy_balanced_terminal_reward_with_aux),
       'task': config.task,
       'episode_steps': episode_steps,
       'cue_query_distance': cue_query_distance,

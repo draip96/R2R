@@ -294,6 +294,22 @@ def normalized_terminal_reward_loss(loss, is_last, terminal_weight):
   return weighted_loss, metrics
 
 
+def balanced_terminal_reward_with_auxiliary_loss(
+    scaled_losses, reward_loss, target, is_last, reward_scale):
+  """Replace native reward averaging while retaining scaled auxiliaries."""
+  balanced_reward, metrics = balanced_terminal_reward_loss(
+      reward_loss, target, is_last)
+  auxiliary_loss = sum(
+      value.mean() for key, value in scaled_losses.items()
+      if key != 'reward')
+  total_loss = auxiliary_loss + reward_scale * balanced_reward
+  metrics.update({
+      'terminal_reward_auxiliary_loss': auxiliary_loss,
+      'terminal_reward_total_loss': total_loss,
+  })
+  return total_loss, metrics
+
+
 class Moments(nj.Module):
 
   def __init__(

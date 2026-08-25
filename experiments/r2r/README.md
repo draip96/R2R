@@ -154,6 +154,19 @@ earlier scale-only and weight-only arms identify the interaction: all native
 losses and uniform replay remain present, while terminal reward gradients now
 dominate both within the reward term and relative to auxiliary model terms.
 
+If that interaction still fails, isolate auxiliary-gradient interference with:
+
+```bash
+experiments/r2r/submit_toy_auxiliary_ablation.sh
+```
+
+This is a 25k, seed-0, world-model-only 2x2 factorial. Every arm uses the exact
+balanced terminal reward objective; KL (`dyn+rep`) and
+reconstruction/continuation losses are independently enabled or disabled. The
+reward-only cell must reproduce the earlier positive control, while the other
+three cells identify the smallest native auxiliary group that prevents cue
+acquisition. Replay sampling and all optimizer settings remain fixed.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:
