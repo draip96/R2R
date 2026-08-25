@@ -100,6 +100,28 @@ class Agent(nj.Module):
     outputs, _ = self.task_behavior.policy(latent, task_state)
     return outputs['action'].mode()
 
+  def imagination_diagnostics(self, state, is_terminal, horizon=15):
+    """Return deterministic actor-imagination signals from policy state."""
+    (latent, _), task_state, _ = state
+
+    def policy(current):
+      outputs, _ = self.task_behavior.policy(current, task_state)
+      return outputs['action'].mode()
+
+    start = {**latent, 'is_terminal': is_terminal}
+    trajectory = self.wm.imagine(policy, start, int(horizon))
+    critic = self.task_behavior.ac.critics['extr']
+    reward, returns, value = critic.score(
+        trajectory, self.task_behavior.ac.actor)
+    return {
+        'action': trajectory['action'],
+        'cont': trajectory['cont'],
+        'weight': trajectory['weight'],
+        'reward': reward,
+        'return': returns,
+        'value': value,
+    }
+
   def train(self, data, state):
     self.config.jax.jit and print('Tracing train function.')
     metrics = {}

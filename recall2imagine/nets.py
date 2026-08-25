@@ -14,6 +14,19 @@ from . import ninjax as nj
 cast = jaxutils.cast_to_compute
 
 
+def reset_shifted_stoch(
+    predecessor_stoch, initial_stoch, post_stoch, is_first):
+  """Build teacher-forcing predecessors with true episode resets."""
+  shifted = jnp.concatenate([
+      predecessor_stoch[:, None], post_stoch[:, :-1]], axis=1)
+  reset = is_first.astype(bool)
+  while reset.ndim < shifted.ndim:
+    reset = reset[..., None]
+  initial = jnp.broadcast_to(
+      initial_stoch[:, None], shifted.shape)
+  return jnp.where(reset, initial, shifted)
+
+
 class RSSM(nj.Module):
   """ A base class with SSM api """
   
@@ -89,8 +102,8 @@ class RSSM(nj.Module):
     # end obs line
     
     # imagination teacher (== posterior) forcing
-    post_stoch = jnp.concatenate([
-      state['stoch'][:, None], post['stoch'][:, :-1]], 1)
+    post_stoch = reset_shifted_stoch(
+        state['stoch'], zero_state['stoch'], post['stoch'], is_first)
     if self._classes:
       shape = post_stoch.shape[:-2] + (self._stoch * self._classes,)
       post_stoch = post_stoch.reshape(shape)

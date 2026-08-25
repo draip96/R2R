@@ -246,13 +246,20 @@ R2R_SOURCE_CAMPAIGN=CAMPAIGN \
 ```
 
 The default target is 100k cumulative interactions. Model, actor, critic,
-optimizers, RNG counters, uniform replay, and dense cache are restored; the
-durable T=64 mirror can replace at most one incomplete 64-row tail after a
-crash. The continuation records retention separately rather than treating more
-training as a hidden hyperparameter change.
+optimizer variables, counters, uniform replay, and dense cache are restored;
+agent, replay-sampler, and environment RNG streams restart, so this is not a
+trajectory-identical continuation. The durable T=64 mirror can replace at most
+one incomplete 64-row tail after a crash. The continuation records retention
+separately rather than treating more training as a hidden hyperparameter
+change.
 The continuation also logs scalar summaries of imagined continuation and
 trajectory weights; these are read-only diagnostics for detecting returns that
 continue past the learned terminal transition.
+
+For a phase-conditioned snapshot from a saved distance-8 checkpoint, run
+`probe_toy_imagination.py` on a Slurm GPU allocation. It reports actor actions,
+one-step reward and continuation, critic returns, and imagination weights for
+each real episode phase without updating the checkpoint.
 
 ## Gated downstream campaign
 

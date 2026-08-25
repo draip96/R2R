@@ -124,6 +124,18 @@ class JAXAgent(embodied.Agent):
     outputs, _ = self._actor_from_state(varibs, rng, state)
     return self._convert_outs(outputs, self.policy_devices)
 
+  def imagination_diagnostics(self, state, is_terminal, horizon=15):
+    state = tree_map(
+        np.asarray, state, is_leaf=lambda x: isinstance(x, list))
+    state = self._convert_inps(state, self.policy_devices)
+    is_terminal = self._convert_inps(
+        np.asarray(is_terminal), self.policy_devices)
+    rng = self._next_rngs(self.policy_devices)
+    varibs = self.varibs if self.single_device else self.policy_varibs
+    outputs, _ = self._imagination_diagnostics(
+        varibs, rng, state, is_terminal, horizon=horizon)
+    return self._convert_outs(outputs, self.policy_devices)
+
   def train(self, data, state=None):
     rng = self._next_rngs(self.train_devices)
     if state is None:
@@ -234,6 +246,8 @@ class JAXAgent(embodied.Agent):
     self._model_reward_from_state = nj.pure(
         self.agent.model_reward_from_state)
     self._actor_from_state = nj.pure(self.agent.actor_from_state)
+    self._imagination_diagnostics = nj.pure(
+        self.agent.imagination_diagnostics)
     self._train = nj.pure(self.agent.train)
     self._report = nj.pure(self.agent.report)
     if len(self.train_devices) == 1:
@@ -255,6 +269,8 @@ class JAXAgent(embodied.Agent):
       self._model_reward_from_state = nj.jit(
           self._model_reward_from_state, **kw)
       self._actor_from_state = nj.jit(self._actor_from_state, **kw)
+      self._imagination_diagnostics = nj.jit(
+          self._imagination_diagnostics, static=['horizon'], **kw)
     else:
       kw = dict(devices=self.policy_devices)
       self._init_policy = nj.pmap(self._init_policy, 'i', **kw)
@@ -265,6 +281,8 @@ class JAXAgent(embodied.Agent):
           self._model_reward_from_state, 'i', **kw)
       self._actor_from_state = nj.pmap(
           self._actor_from_state, 'i', **kw)
+      self._imagination_diagnostics = nj.pmap(
+          self._imagination_diagnostics, 'i', static=['horizon'], **kw)
 
   def _convert_inps(self, value, devices):
     if len(devices) == 1:

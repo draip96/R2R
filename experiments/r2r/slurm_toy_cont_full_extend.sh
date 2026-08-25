@@ -46,7 +46,8 @@ printf 'source_campaign=%s\nsource_steps=%s\ntarget_steps=%s\n' \
   "${SOURCE_CAMPAIGN}" "${current_steps}" "${TARGET_STEPS}" \
   > "${PROVENANCE}/continuation.txt"
 printf '%s\n' \
-  'The checkpoint restores model, optimizer, counters, and RNG state.' \
+  'The checkpoint restores model/optimizer variables, counters, and the replay' \
+  'table/cache, but agent, replay-sampler, and environment RNG streams restart.' \
   'The durable T=64 replay/cache mirror is restored without filtering or' \
   'resampling; a crash can replace at most one incomplete 64-row tail.' \
   > "${PROVENANCE}/resume-qualification.txt"
