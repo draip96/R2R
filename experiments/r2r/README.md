@@ -250,6 +250,9 @@ optimizers, RNG counters, uniform replay, and dense cache are restored; the
 durable T=64 mirror can replace at most one incomplete 64-row tail after a
 crash. The continuation records retention separately rather than treating more
 training as a hidden hyperparameter change.
+The continuation also logs scalar summaries of imagined continuation and
+trajectory weights; these are read-only diagnostics for detecting returns that
+continue past the learned terminal transition.
 
 ## Gated downstream campaign
 

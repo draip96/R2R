@@ -469,6 +469,8 @@ class ImagActorCritic(nj.Module):
     metrics.update(jaxutils.tensorstats(ent, 'policy_entropy'))
     metrics.update(jaxutils.tensorstats(logpi, 'policy_logprob'))
     metrics.update(jaxutils.tensorstats(adv, 'adv'))
+    metrics.update(jaxutils.tensorstats(traj['cont'], 'imag_cont'))
+    metrics.update(jaxutils.tensorstats(traj['weight'], 'imag_weight'))
     metrics['imag_weight_dist'] = jaxutils.subsample(traj['weight'])
     return metrics
 
