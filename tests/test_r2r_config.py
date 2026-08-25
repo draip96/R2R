@@ -74,6 +74,7 @@ class R2RConfigTest(unittest.TestCase):
     defaults = self.config['defaults']
     self.assertFalse(defaults['toy_terminal_reward_only'])
     self.assertFalse(defaults['toy_balanced_terminal_reward_with_aux'])
+    self.assertFalse(defaults['toy_balanced_sparse_reward_with_aux'])
     self.assertEqual(defaults['toy_terminal_reward_weight'], 1.0)
     self.assertEqual(defaults['toy_arm'], 'auto')
 
@@ -118,6 +119,13 @@ class R2RConfigTest(unittest.TestCase):
     cont_memory = self.config['toy_balanced_terminal_cont_memory']
     self.assertTrue(cont_memory['toy_balanced_terminal_reward_with_aux'])
     self.assertEqual(cont_memory['loss_scales.cont'], 1.0)
+
+    sparse = self.config['toy_balanced_sparse_dyn_cont_memory']
+    self.assertTrue(sparse['toy_balanced_sparse_reward_with_aux'])
+    self.assertEqual(sparse['loss_scales.dyn'], 0.5)
+    self.assertEqual(sparse['loss_scales.rep'], 0.0)
+    self.assertEqual(sparse['loss_scales.vector'], 0.0)
+    self.assertEqual(sparse['loss_scales.cont'], 1.0)
     for key in ('dyn', 'rep', 'vector'):
       self.assertEqual(cont_memory[f'loss_scales.{key}'], 0.0)
 

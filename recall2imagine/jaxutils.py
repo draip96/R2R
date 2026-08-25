@@ -277,6 +277,33 @@ def balanced_terminal_reward_loss(loss, target, is_last):
   return balanced, metrics
 
 
+def balanced_sparse_reward_loss(loss, target, is_last):
+  """Equal-class mean over nonterminal 0 and terminal +/-1 rewards."""
+  target = target.astype(jnp.float32)
+  terminal = is_last.astype(bool)
+  masks = {
+      'zero': (~terminal).astype(jnp.float32),
+      'positive': (terminal & (target > 0.5)).astype(jnp.float32),
+      'negative': (terminal & (target < -0.5)).astype(jnp.float32),
+  }
+  means = {}
+  counts = {}
+  present = {}
+  for name, mask in masks.items():
+    counts[name] = mask.sum()
+    means[name] = (loss * mask).sum() / jnp.maximum(counts[name], 1.0)
+    present[name] = (counts[name] > 0).astype(jnp.float32)
+  class_count = sum(present.values())
+  balanced = sum(
+      present[name] * means[name] for name in masks
+  ) / jnp.maximum(class_count, 1.0)
+  metrics = {'sparse_reward_objective': balanced}
+  for name in masks:
+    metrics[f'sparse_reward_{name}_loss'] = means[name]
+    metrics[f'sparse_reward_{name}_count'] = counts[name]
+  return balanced, metrics
+
+
 def normalized_terminal_reward_loss(loss, is_last, terminal_weight):
   """Upweight terminal rows without changing the reward loss mean scale."""
   terminal_weight = jnp.asarray(terminal_weight, jnp.float32)
@@ -306,6 +333,22 @@ def balanced_terminal_reward_with_auxiliary_loss(
   metrics.update({
       'terminal_reward_auxiliary_loss': auxiliary_loss,
       'terminal_reward_total_loss': total_loss,
+  })
+  return total_loss, metrics
+
+
+def balanced_sparse_reward_with_auxiliary_loss(
+    scaled_losses, reward_loss, target, is_last, reward_scale):
+  """Use three-class sparse reward means while retaining auxiliaries."""
+  balanced_reward, metrics = balanced_sparse_reward_loss(
+      reward_loss, target, is_last)
+  auxiliary_loss = sum(
+      value.mean() for key, value in scaled_losses.items()
+      if key != 'reward')
+  total_loss = auxiliary_loss + reward_scale * balanced_reward
+  metrics.update({
+      'sparse_reward_auxiliary_loss': auxiliary_loss,
+      'sparse_reward_total_loss': total_loss,
   })
   return total_loss, metrics
 

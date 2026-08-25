@@ -261,6 +261,22 @@ For a phase-conditioned snapshot from a saved distance-8 checkpoint, run
 one-step reward and continuation, critic returns, and imagination weights for
 each real episode phase without updating the checkpoint.
 
+If that probe shows unconstrained nonterminal rewards and an untrained sampled
+prior, run the matched sparse-prior repair:
+
+```bash
+experiments/r2r/submit_toy_sparse_prior_promotion.sh
+```
+
+This keeps uniform replay, `T=64`, `B=64`, continuation, optimizers, actor,
+critic, and imagination settings fixed. Its reward objective gives equal weight
+to the three real ToyMemory reward classes (nonterminal 0, terminal +1, and
+terminal -1), and restores only the native dynamics KL at scale 0.5 so the
+sampled prior used by actor imagination is trained. Representation KL and
+reconstruction stay disabled because the earlier acquisition factorial found
+that those gradients suppress the cue. The two 50k arms are direct BPTT and
+full BF16 state-adjoint R2R from the same reset-corrected commit.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:

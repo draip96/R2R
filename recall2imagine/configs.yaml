@@ -78,6 +78,7 @@ defaults:
   state_gradient_cache: {enabled: True, storage_dtype: bfloat16}
   toy_terminal_reward_only: False
   toy_balanced_terminal_reward_with_aux: False
+  toy_balanced_sparse_reward_with_aux: False
   toy_terminal_reward_weight: 1.0
   toy_arm: auto
 
@@ -420,6 +421,18 @@ toy_detached_aux_heads:
 toy_balanced_terminal_cont_memory:
   toy_balanced_terminal_reward_with_aux: True
   loss_scales.dyn: 0.0
+  loss_scales.rep: 0.0
+  loss_scales.vector: 0.0
+  loss_scales.cont: 1.0
+
+# Actor-safe sparse-reward profile. Equal means for nonterminal zero rewards
+# and terminal +/-1 rewards constrain every real reward class. The native
+# dynamics KL trains the stochastic prior used by imagination; representation
+# KL and reconstruction remain disabled because the acquisition factorial found
+# that those auxiliary gradients suppress cue learning at their native scales.
+toy_balanced_sparse_dyn_cont_memory:
+  toy_balanced_sparse_reward_with_aux: True
+  loss_scales.dyn: 0.5
   loss_scales.rep: 0.0
   loss_scales.vector: 0.0
   loss_scales.cont: 1.0

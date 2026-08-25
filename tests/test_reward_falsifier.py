@@ -44,6 +44,23 @@ class RewardFalsifierTest(unittest.TestCase):
     self.assertEqual(float(value), 3.0)
     self.assertEqual(float(metrics['terminal_reward_negative_count']), 0.0)
 
+  def test_sparse_reward_balances_zero_positive_and_negative_classes(self):
+    losses = jnp.asarray([[9.0, 2.0, 4.0], [6.0, 8.0, 3.0]])
+    rewards = jnp.asarray([[0.0, 1.0, 1.0], [-1.0, -1.0, 0.0]])
+    is_last = jnp.asarray([[0, 1, 1], [1, 1, 0]], bool)
+    value, metrics = jaxutils.balanced_sparse_reward_loss(
+        losses, rewards, is_last)
+    # Zero mean is 6, positive mean is 3, and negative mean is 7.
+    self.assertAlmostEqual(float(value), 16 / 3, places=6)
+    self.assertEqual(float(metrics['sparse_reward_zero_count']), 2.0)
+    self.assertEqual(float(metrics['sparse_reward_positive_count']), 2.0)
+    self.assertEqual(float(metrics['sparse_reward_negative_count']), 2.0)
+    gradient = jax.grad(lambda x: (
+        jaxutils.balanced_sparse_reward_loss(
+            x, rewards, is_last)[0]))(losses)
+    np.testing.assert_allclose(
+        np.asarray(gradient), np.full((2, 3), 1 / 6, np.float32))
+
   def test_terminal_weighting_preserves_mean_weight(self):
     losses = jnp.asarray([[1.0, 2.0, 3.0, 4.0]])
     is_last = jnp.asarray([[0, 0, 0, 1]], bool)

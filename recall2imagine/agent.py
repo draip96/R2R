@@ -268,9 +268,10 @@ class WorldModel(nj.Module):
     if terminal_weight != 1.0:
       if terminal_weight < 1.0:
         raise ValueError('toy_terminal_reward_weight must be at least 1')
-      if self.config.toy_terminal_reward_only:
+      if (self.config.toy_terminal_reward_only or
+          self.config.toy_balanced_sparse_reward_with_aux):
         raise ValueError(
-            'terminal weighting and terminal-only falsifier are exclusive')
+            'terminal weighting and balanced toy objectives are exclusive')
       weighted_reward, diagnostic_metrics = (
           jaxutils.normalized_terminal_reward_loss(
               losses['reward'], data['is_last'], terminal_weight))
@@ -287,12 +288,24 @@ class WorldModel(nj.Module):
     metrics.update(diagnostic_metrics)
     loss = model_loss.mean()
     if self.config.toy_balanced_terminal_reward_with_aux:
-      if self.config.toy_terminal_reward_only or terminal_weight != 1.0:
+      if (self.config.toy_terminal_reward_only or
+          self.config.toy_balanced_sparse_reward_with_aux or
+          terminal_weight != 1.0):
         raise ValueError(
             'balanced terminal reward with auxiliaries is exclusive with '
             'other toy reward objectives')
       loss, diagnostic_metrics = (
           jaxutils.balanced_terminal_reward_with_auxiliary_loss(
+              scaled, losses['reward'], data['reward'], data['is_last'],
+              self.scales['reward']))
+      metrics.update(diagnostic_metrics)
+    if self.config.toy_balanced_sparse_reward_with_aux:
+      if self.config.toy_terminal_reward_only or terminal_weight != 1.0:
+        raise ValueError(
+            'balanced sparse reward with auxiliaries is exclusive with '
+            'other toy reward objectives')
+      loss, diagnostic_metrics = (
+          jaxutils.balanced_sparse_reward_with_auxiliary_loss(
               scaled, losses['reward'], data['reward'], data['is_last'],
               self.scales['reward']))
       metrics.update(diagnostic_metrics)
