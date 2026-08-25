@@ -414,6 +414,16 @@ toy_balanced_terminal_cont_world_model:
 toy_detached_aux_heads:
   grad_heads: [reward]
 
+# Full-agent profile selected by the continuation audit. Continuation retains
+# its native shared-core gradient; KL and observation reconstruction remain off
+# because either auxiliary group independently blocked the distance-8 memory.
+toy_balanced_terminal_cont_memory:
+  toy_balanced_terminal_reward_with_aux: True
+  loss_scales.dyn: 0.0
+  loss_scales.rep: 0.0
+  loss_scales.vector: 0.0
+  loss_scales.cont: 1.0
+
 # Cache-disabled R2I learner shape for the matched distance-8 window control.
 toy_r2i_reference:
   run.toy_stop_on_success: False

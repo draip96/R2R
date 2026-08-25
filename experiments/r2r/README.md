@@ -208,6 +208,19 @@ a 25k source therefore restores through 24,960 and loses up to 40 partial-tail
 replay rows. The launcher records this qualification explicitly; replay remains
 uniform.
 
+After shared continuation retains model acquisition, promote it through matched
+full-agent runs with:
+
+```bash
+experiments/r2r/submit_toy_cont_promotion.sh
+```
+
+These 50k distance-8 arms retain the exact balanced terminal reward plus the
+native continuation loss. KL and observation reconstruction remain disabled by
+the preceding factorial. Direct BPTT is cache-off; full R2R uses the dense BF16
+state/adjoint cache. Actor-plus-model retention determines whether learned
+termination removes the repeated-reward imagination exploit.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:
