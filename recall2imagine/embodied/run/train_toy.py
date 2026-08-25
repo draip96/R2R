@@ -113,6 +113,10 @@ def train_toy(
     world_model_only=False):
   logdir = embodied.Path(args.logdir)
   logdir.mkdirs()
+  summary_path = Path(str(logdir)) / 'toy_summary.json'
+  previous_summary = (
+      json.loads(summary_path.read_text()) if summary_path.exists() else {})
+  resumed_from_step = int(previous_summary.get('environment_steps', 0))
   episode_steps = int(config.task.split('_', 1)[1])
   cue_query_distance = episode_steps - 2
   arm = str(config.toy_arm)
@@ -137,11 +141,14 @@ def train_toy(
       if world_model_only else
       'actor and model reward-choice accuracy reached 100%\n')
   failure_message = (
-      '25k-step teacher-forced terminal reward gate was not reached\n'
+      f'{int(args.steps)}-step teacher-forced terminal reward gate was not '
+      'reached\n'
       if config.toy_terminal_reward_only else
-      '25k-step model reward-choice accuracy gate was not reached\n'
+      f'{int(args.steps)}-step model reward-choice accuracy gate was not '
+      'reached\n'
       if world_model_only else
-      '25k-step actor-plus-model accuracy gate was not reached\n')
+      f'{int(args.steps)}-step actor-plus-model accuracy gate was not '
+      'reached\n')
 
   should_expl = embodied.when.Until(args.expl_until)
   should_train = embodied.when.Ratio(args.train_ratio / args.batch_steps)
@@ -149,7 +156,9 @@ def train_toy(
   should_save = embodied.when.Clock(args.save_every)
   should_sync = embodied.when.Every(args.sync_every)
   step = logger.step
-  updates = embodied.Counter()
+  # Older ToyMemory checkpoints did not include this counter. Seed it from the
+  # durable evaluation summary; newer checkpoints override it on load below.
+  updates = embodied.Counter(previous_summary.get('learner_updates', 0))
   metrics = embodied.Metrics()
   timer = embodied.Timer()
   timer.wrap('agent', agent, ['policy', 'train', 'save'])
@@ -223,9 +232,15 @@ def train_toy(
   checkpoint.step = step
   checkpoint.agent = agent
   checkpoint.replay = replay
+  checkpoint.updates = updates
   if args.from_checkpoint:
     checkpoint.load(args.from_checkpoint)
   checkpoint.load_or_save()
+  if resumed_from_step and resumed_from_step < int(args.steps):
+    # A previous target was missed, but the extended run is not yet a failure.
+    failed_marker = Path(str(logdir)) / 'FAILED'
+    if failed_marker.exists():
+      failed_marker.unlink()
   should_save(step)
 
   policy = lambda *values: agent.policy(
@@ -233,9 +248,7 @@ def train_toy(
   evaluation_every = int(args.toy_eval_every)
   # Anchor the panel schedule to the exact prefill boundary. On resume, the
   # durable summary advances the grid instead of shifting it by another 1000.
-  summary_path = Path(str(logdir)) / 'toy_summary.json'
-  if summary_path.exists():
-    previous_summary = json.loads(summary_path.read_text())
+  if previous_summary:
     last_evaluation_step = int(previous_summary['environment_steps'])
     next_evaluation = last_evaluation_step + evaluation_every
   else:
@@ -275,6 +288,7 @@ def train_toy(
           'cue_query_distance': cue_query_distance,
           'window': int(config.batch_length),
           'batch_size': int(config.batch_size),
+          'resumed_from_step': resumed_from_step,
           'environment_steps': int(step),
           'learner_updates': int(updates),
           'evaluation': final_evaluation,
@@ -313,6 +327,7 @@ def train_toy(
       'cue_query_distance': cue_query_distance,
       'window': int(config.batch_length),
       'batch_size': int(config.batch_size),
+      'resumed_from_step': resumed_from_step,
       'environment_steps': int(step),
       'learner_updates': int(updates),
       'evaluation': final_evaluation,

@@ -95,6 +95,18 @@ one-step model choice. The R2I arm uses the native objective and full agent at
 `1024x4` with state-gradient caching disabled. The configured one-million-row
 replay differs from R2I's historical capacity but cannot bind in a 25k run.
 
+Continue the cache-disabled `1024x4` control from its 25k checkpoint to 100k
+total interactions with:
+
+```bash
+experiments/r2r/submit_toy_r2i_long.sh
+```
+
+The continuation reuses the checkpoint and persistent replay sidecar in place,
+keeps the original JSONL history, records separate continuation provenance,
+and reports the cumulative expected 23,976 learner updates. Override
+`R2R_SOURCE_CAMPAIGN` or `R2R_TARGET_STEPS` when resuming another campaign.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:
