@@ -141,6 +141,19 @@ rows inside the reward loss changes; normalization keeps the mean reward-loss
 weight at one. These remain diagnostic acquisition arms, not production R2R
 defaults.
 
+If normalized row weighting still misses the positive control's acquisition
+transition, test whether native auxiliary-gradient competition is the remaining
+bottleneck with:
+
+```bash
+experiments/r2r/submit_toy_weighted_reward_wm.sh
+```
+
+This crosses terminal weights 10 and 100 with `loss_scales.reward: 10`. The
+earlier scale-only and weight-only arms identify the interaction: all native
+losses and uniform replay remain present, while terminal reward gradients now
+dominate both within the reward term and relative to auxiliary model terms.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:
