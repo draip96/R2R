@@ -10,6 +10,23 @@ import jax
 import numpy as np
 
 
+def _mean_or_zero(values):
+  values = np.asarray(values)
+  return float(values.mean()) if values.size else 0.0
+
+
+def _opposite_cue_diagnostics(actor_actions, opposite_actions, contexts):
+  actor_actions = np.asarray(actor_actions)
+  opposite_actions = np.asarray(opposite_actions)
+  contexts = np.asarray(contexts)
+  return {
+      'opposite_cue_state_accuracy': float(np.mean(
+          opposite_actions == contexts)),
+      'opposite_cue_state_action_flip_rate': float(np.mean(
+          opposite_actions != actor_actions)),
+  }
+
+
 def _write_summary(logdir, value):
   path = Path(str(logdir)) / 'toy_summary.json'
   temporary = path.with_suffix('.json.tmp')
@@ -65,7 +82,8 @@ def _balanced_evaluation(agent, env, episodes):
   order = np.arange(episodes, dtype=np.int32).reshape(-1, 2)[:, ::-1].reshape(-1)
   swapped = jax.tree_util.tree_map(lambda value: value[order], merged)
   opposite_actions = np.argmax(agent.actor_from_state(swapped), axis=-1)
-  opposite_contexts = contexts[order]
+  opposite_diagnostics = _opposite_cue_diagnostics(
+      actor_actions, opposite_actions, contexts)
   terminal_merged = jax.tree_util.tree_map(
       lambda *values: np.concatenate(values, axis=0), *terminal_states)
   terminal_values = np.asarray(
@@ -78,7 +96,7 @@ def _balanced_evaluation(agent, env, episodes):
   reward_values = np.asarray(rewards, np.float64)
   correct_values = model_values[np.arange(episodes), contexts]
   incorrect_values = model_values[np.arange(episodes), 1 - contexts]
-  return {
+  result = {
       'episodes': int(episodes),
       'actor_accuracy': float(np.mean(actor_actions == contexts)),
       'model_reward_choice_accuracy': float(
@@ -91,21 +109,23 @@ def _balanced_evaluation(agent, env, episodes):
           correct_values - incorrect_values)),
       'teacher_terminal_sign_accuracy': float(np.mean(
           terminal_sign_correct)),
-      'teacher_terminal_positive_accuracy': float(np.mean(
-          terminal_values[terminal_positive] > 0.0)),
-      'teacher_terminal_negative_accuracy': float(np.mean(
-          terminal_values[terminal_negative] < 0.0)),
-      'teacher_terminal_value_margin': float(
-          terminal_values[terminal_positive].mean() -
-          terminal_values[terminal_negative].mean()),
+      'teacher_terminal_positive_accuracy': _mean_or_zero(
+          terminal_values[terminal_positive] > 0.0),
+      'teacher_terminal_negative_accuracy': _mean_or_zero(
+          terminal_values[terminal_negative] < 0.0),
+      'teacher_terminal_positive_count': int(terminal_positive.sum()),
+      'teacher_terminal_negative_count': int(terminal_negative.sum()),
+      'teacher_terminal_value_margin': (
+          _mean_or_zero(terminal_values[terminal_positive]) -
+          _mean_or_zero(terminal_values[terminal_negative])),
       'teacher_terminal_mae': float(np.mean(np.abs(
           terminal_values - terminal_rewards))),
       'reset_state_accuracy': float(np.mean(reset_actions == contexts)),
-      'opposite_cue_state_accuracy': float(
-          np.mean(opposite_actions == opposite_contexts)),
       'mean_reward': float(reward_values.mean()),
       'finite': bool(np.isfinite(reward_values).all()),
   }
+  result.update(opposite_diagnostics)
+  return result
 
 
 def train_toy(
