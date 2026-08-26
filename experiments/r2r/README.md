@@ -269,6 +269,17 @@ distance-16/32 campaign, and immutable training snapshot `421666e`. Override
 `R2R_SEED0_CAMPAIGN`, or `R2R_TRAINING_COMMIT` only when promoting a different
 fully qualified profile.
 
+Campaign `20260826T175359Z` (Slurm array `5036048`) completed all six seed-1/2
+replications with clean exits and final joint retention. Together with the
+qualified seed-0 sources, all nine distance/seed cells reached exact actor and
+model accuracy. First model acquisition ranged from step 15,096 to 43,096 and
+first actor acquisition from 23,096 to 47,096. Every 60k replication retained
+the joint solution on steps 56,096, 57,096, 58,096, 59,096, and 60,000; the
+50k seed-0 distance-8 source retained it on its analogous final five panels.
+These distances are all shorter than `T=64`, so this is an implementation and
+acquisition qualification, not evidence for cached credit beyond one learner
+window.
+
 If the cached distance-8 world model solves but its actor remains at chance at
 50k, continue that exact checkpoint and objective without changing any
 hyperparameter:
