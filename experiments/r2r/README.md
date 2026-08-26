@@ -222,27 +222,37 @@ state/adjoint cache. Actor-plus-model retention determines whether learned
 termination removes the repeated-reward imagination exploit.
 
 The native-scale sparse-prior pair failed, the dynamics-scale-zero direct-BPTT
-oracle passed, and the `0.05` full-R2R arm subsequently retained exact actor
-and model accuracy through 60k. The matched direct-BPTT `0.05` arm remained at
-chance, while a second `0.005` full-R2R run independently retained the same
-solution by 50k. Promote the closer-to-native passing scale (`0.05`) to
-distances 16 and 32 with:
+oracle passed, and the `0.05` full-R2R distance-8 arm subsequently retained
+exact actor and model accuracy through 60k. The matched direct-BPTT `0.05` arm
+remained at chance, while a second `0.005` full-R2R run independently retained
+the same distance-8 solution by 50k. Promote a passing scale to distances 16
+and 32 with:
 
 ```bash
 experiments/r2r/submit_toy_cont_distances.sh
 ```
 
 Both jobs remain `T=64`, `B=64`, seed 0, use the equal-class sparse-reward
-objective and dynamics scale `0.05`, and run 60k interactions. The submission
-gate rechecks the retained distance-8 source. It also creates a detached Git
-worktree at the exact submitted commit so queued array tasks cannot silently
-pick up later checkout edits. Each distance writes `ROBUST_SUCCESS` only after
-five consecutive balanced 128-episode panels have actor accuracy 1.0, model
+objective, and run 60k interactions by default. The submission gate rechecks
+the retained distance-8 source. It also creates a detached Git worktree at the
+exact submitted commit so queued array tasks cannot silently pick up later
+checkout edits. Each distance writes `ROBUST_SUCCESS` only after five
+consecutive balanced 128-episode panels have actor accuracy 1.0, model
 reward-choice accuracy 1.0, and finite model margin of at least 0.1, with the
-exact gate still passing at 60k. No replay, cache, optimizer, sampling,
-imagination, batch, or window setting changes. `R2R_TARGET_STEPS`,
-`R2R_DYN_SCALE`, and `R2R_SEED` are explicit overrides for continuations or
-replication campaigns.
+exact gate still passing at the requested endpoint. No replay, cache,
+optimizer, sampling, imagination, batch, or window setting changes.
+`R2R_TARGET_STEPS`, `R2R_DYN_SCALE`, and `R2R_SEED` are explicit overrides for
+continuations or replication campaigns.
+
+The seed-0 `0.05` promotion solved distance 32 within 60k. At distance 16 its
+world model solved by 23,096, but its actor remained at chance through 60k; an
+additional-time-only continuation first solved the actor at 71k and retained
+the joint solution through 100k. Because `0.005` solved distances 8, 16, and 32
+within one common 60k budget, that 100-times-reduced dynamics scale is the
+selected fast replication profile. This is a ToyMemory acquisition diagnostic,
+not a native-R2I-objective result: reward-class balancing, zero representation
+and reconstruction scales, and the reduced dynamics scale must be reported as
+scientific deviations.
 
 After all three seed-0 runs pass that retained gate, launch the exact same
 60k profile for seeds 1 and 2 at distances 8, 16, and 32:
@@ -252,10 +262,12 @@ experiments/r2r/submit_toy_sparse_seed_audit.sh
 ```
 
 The submission validates every seed-0 summary, config, clean provenance, and
-final retention streak before allocating GPUs. The six replication cells run
-from the immutable `1b503a5` training snapshot even if later commits add
-launch or analysis tooling. Override `R2R_SEED0_CAMPAIGN` only when promoting a
-different completed distance-16/32 campaign.
+final retention streak before allocating GPUs. Its defaults select dynamics
+scale `0.005`, the retained 50k distance-8 source, the retained 60k
+distance-16/32 campaign, and immutable training snapshot `421666e`. Override
+`R2R_DYN_SCALE`, `R2R_DISTANCE8_SOURCE`, `R2R_DISTANCE8_FINAL_STEP`,
+`R2R_SEED0_CAMPAIGN`, or `R2R_TRAINING_COMMIT` only when promoting a different
+fully qualified profile.
 
 If the cached distance-8 world model solves but its actor remains at chance at
 50k, continue that exact checkpoint and objective without changing any
