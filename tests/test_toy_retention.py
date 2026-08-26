@@ -36,6 +36,20 @@ class ToyRetentionTest(unittest.TestCase):
     self.assertEqual(selected, [])
     self.assertEqual(final['step'], 50000)
 
+  def test_old_streak_and_isolated_final_solve_do_not_pass(self):
+    evaluations = [
+        _record(step, 1.0, 1.0) for step in range(10000, 14001, 1000)]
+    evaluations.extend([
+        _record(15000, 0.5, 0.5),
+        _record(50000, 1.0, 1.0),
+    ])
+    passed, selected, final = retained(
+        evaluations, 5, 1000, 50000, 0.1, criterion='joint')
+    self.assertFalse(passed)
+    self.assertEqual([record['step'] for record in selected], [
+        10000, 11000, 12000, 13000, 14000])
+    self.assertEqual(final['step'], 50000)
+
 
 if __name__ == '__main__':
   unittest.main()

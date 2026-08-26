@@ -68,9 +68,13 @@ def retained(
 
   final = evaluations[-1] if evaluations else None
   passed = bool(
-      len(best) >= panels and final and
+      len(current) >= panels and final and
       int(final['step']) == final_step and solved(final))
-  return passed, best[-panels:], final
+  # A successful report must show the exact final contiguous streak that
+  # justified promotion. For a miss, retain the best historical streak as a
+  # diagnostic without allowing it to satisfy the gate.
+  selected = current[-panels:] if passed else best[-panels:]
+  return passed, selected, final
 
 
 def main():
