@@ -8,7 +8,7 @@ from pathlib import Path
 
 import jax
 import numpy as np
-import yaml
+import ruamel.yaml as yaml
 
 import recall2imagine.embodied as embodied
 from recall2imagine import agent as agt
@@ -55,7 +55,8 @@ def main():
   if args.samples < 1:
     raise ValueError('--samples must be positive')
   config_path = args.config or args.checkpoint.parent / 'config.yaml'
-  config = embodied.Config(yaml.safe_load(config_path.read_text()))
+  config = embodied.Config(
+      yaml.YAML(typ='safe').load(config_path.read_text()))
   step = embodied.Counter()
   env = train.make_envs(config, seed=10_000_019, balanced=True)
   agent = agt.Agent(env.obs_space, env.act_space, step, config)
