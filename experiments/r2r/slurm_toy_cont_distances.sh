@@ -8,17 +8,43 @@
 #SBATCH --requeue
 #SBATCH --signal=B:USR1@300
 #SBATCH --array=0-1
-#SBATCH --job-name=r2r-cont-distance
-#SBATCH --output=experiments/r2r/toy-cont-distance-%A_%a.out
+#SBATCH --job-name=r2r-sparse-distance
+#SBATCH --output=experiments/r2r/toy-sparse-distance-%A_%a.out
 
 set -euo pipefail
 module load apptainer/1.4.5
 
-R2R_ROOT=/project/6101829/draip/R2R
-R2R_IMAGE=${R2R_IMAGE:-${R2R_ROOT}/.containers/r2i.sif}
-RESULT_ROOT=${R2R_RESULT_ROOT:-${R2R_ROOT}/experiments/r2r/results}
+CANONICAL_ROOT=/project/6101829/draip/R2R
+R2R_ROOT=${R2R_SOURCE_ROOT:-${CANONICAL_ROOT}}
+R2R_EXPECTED_COMMIT=${R2R_EXPECTED_COMMIT:?R2R_EXPECTED_COMMIT is required}
+R2R_IMAGE=${R2R_IMAGE:-${CANONICAL_ROOT}/.containers/r2i.sif}
+RESULT_ROOT=${R2R_RESULT_ROOT:-${CANONICAL_ROOT}/experiments/r2r/results}
 CAMPAIGN=${R2R_CAMPAIGN:?R2R_CAMPAIGN is required}
 SEED=${R2R_SEED:-0}
+TARGET_STEPS=${R2R_TARGET_STEPS:-60000}
+DYN_SCALE=${R2R_DYN_SCALE:-0.05}
+
+actual_commit=$(git -C "${R2R_ROOT}" rev-parse HEAD)
+if [[ ${actual_commit} != "${R2R_EXPECTED_COMMIT}" ]]; then
+  echo "source snapshot ${actual_commit} does not match ${R2R_EXPECTED_COMMIT}" >&2
+  exit 2
+fi
+if [[ -n $(git -C "${R2R_ROOT}" status --porcelain --untracked-files=all) ]]; then
+  echo "source snapshot has tracked or non-ignored untracked files" >&2
+  exit 2
+fi
+if [[ ! ${TARGET_STEPS} =~ ^[0-9]+$ ]] || (( TARGET_STEPS < 50000 )); then
+  echo "R2R_TARGET_STEPS must be an integer of at least 50000" >&2
+  exit 2
+fi
+python - "${DYN_SCALE}" <<'PY'
+import math
+import sys
+
+value = float(sys.argv[1])
+if not math.isfinite(value) or not 0.0 < value <= 0.05:
+  raise SystemExit('R2R_DYN_SCALE must be finite and in (0, 0.05]')
+PY
 
 case "${SLURM_ARRAY_TASK_ID}" in
   0) DISTANCE=16 ;;
@@ -29,13 +55,23 @@ case "${SLURM_ARRAY_TASK_ID}" in
     ;;
 esac
 
-OUTPUT=${RESULT_ROOT}/toy_cont_distances/${CAMPAIGN}/distance${DISTANCE}_seed${SEED}
-REPLAY_DIRECTORY=${SLURM_TMPDIR:?}/r2r-cont-distance-${CAMPAIGN}-${DISTANCE}-${SEED}
+DYN_TAG=${DYN_SCALE//./p}
+OUTPUT=${RESULT_ROOT}/toy_sparse_dyn_distances/${CAMPAIGN}/distance${DISTANCE}_seed${SEED}
+REPLAY_DIRECTORY=${SLURM_TMPDIR:?}/r2r-sparse-distance-${CAMPAIGN}-${DISTANCE}-${SEED}
 mkdir -p "${OUTPUT}/provenance" "${OUTPUT}/lfs"
 env R2R_ROOT="${R2R_ROOT}" "${R2R_ROOT}/experiments/r2r/record_provenance.sh" \
   "${OUTPUT}/provenance"
+printf '%s\n' \
+  "distance=${DISTANCE}" \
+  "seed=${SEED}" \
+  "target_steps=${TARGET_STEPS}" \
+  "dynamics_loss_scale=${DYN_SCALE}" \
+  "source_root=${R2R_ROOT}" \
+  "expected_commit=${R2R_EXPECTED_COMMIT}" \
+  > "${OUTPUT}/provenance/distance.txt"
 export WANDB_MODE=offline
 export PYTHONHASHSEED=0
+export PYTHONDONTWRITEBYTECODE=1
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
 child=''
@@ -50,20 +86,23 @@ set +e
 apptainer exec --cleanenv --nv \
   --env PYTHONPATH="${R2R_ROOT}" \
   --env WANDB_MODE=offline \
+  --env PYTHONDONTWRITEBYTECODE=1 \
   --bind "${R2R_ROOT}:${R2R_ROOT}" \
+  --bind "${CANONICAL_ROOT}:${CANONICAL_ROOT}" \
   --bind "${SLURM_TMPDIR}:${SLURM_TMPDIR}" \
   --pwd "${R2R_ROOT}" \
   "${R2R_IMAGE}" \
   python recall2imagine/train.py \
-    --configs "toy_memory,toy_distance${DISTANCE},r2r_w64,toy_full_r2r,toy_balanced_terminal_cont_memory" \
+    --configs "toy_memory,toy_distance${DISTANCE},r2r_w64,toy_full_r2r,toy_balanced_sparse_dyn_cont_memory" \
     --seed "${SEED}" \
-    --run.steps 50000 \
-    --toy_arm "balanced_terminal_cont_full_r2r_distance${DISTANCE}" \
+    --loss_scales.dyn "${DYN_SCALE}" \
+    --run.steps "${TARGET_STEPS}" \
+    --toy_arm "balanced_sparse_dyn${DYN_TAG}_full_r2r_distance${DISTANCE}" \
     --logdir "${OUTPUT}" \
     --replay_dir "${REPLAY_DIRECTORY}" \
     --lfs_dir "${OUTPUT}/lfs" \
     --use_lfs True \
-    --wdb_name "R2R-toy-balanced-cont-distance${DISTANCE}-seed${SEED}" &
+    --wdb_name "R2R-toy-sparse-dyn${DYN_TAG}-distance${DISTANCE}-seed${SEED}" &
 child=$!
 wait "${child}"
 status=$?
@@ -76,27 +115,51 @@ if [[ ${status} -ne 0 ]]; then
   exit ${status}
 fi
 
-python - "${OUTPUT}/toy_summary.json" "${DISTANCE}" <<'PY'
+python - "${OUTPUT}/toy_summary.json" "${DISTANCE}" "${TARGET_STEPS}" <<'PY'
 import json
 import pathlib
 import sys
 
 summary = json.loads(pathlib.Path(sys.argv[1]).read_text())
 distance = int(sys.argv[2])
-if summary['environment_steps'] != 50000:
-  raise SystemExit(
-      f"distance {distance} ended at {summary['environment_steps']} rather than 50000")
-if summary['learner_updates'] != 11476:
-  raise SystemExit(
-      f"distance {distance} used {summary['learner_updates']} rather than 11476 updates")
-if summary['cue_query_distance'] != distance:
-  raise SystemExit(
-      f"expected distance {distance}, got {summary['cue_query_distance']}")
-if summary['objective'] != 'balanced_terminal_reward_with_native_auxiliaries':
-  raise SystemExit(f"unexpected objective {summary['objective']!r}")
+target_steps = int(sys.argv[3])
+expected_updates = max(0, (target_steps - 4096 + 3) // 4)
+expected = {
+    'environment_steps': target_steps,
+    'learner_updates': expected_updates,
+    'cue_query_distance': distance,
+    'window': 64,
+    'batch_size': 64,
+    'objective': 'balanced_sparse_reward_with_native_auxiliaries',
+}
+for key, value in expected.items():
+  if summary.get(key) != value:
+    raise SystemExit(
+        f'distance {distance}: expected {key}={value!r}, '
+        f'got {summary.get(key)!r}')
 PY
 
-python experiments/r2r/check_toy_retention.py \
+set +e
+python "${R2R_ROOT}/experiments/r2r/check_toy_retention.py" \
+  --criterion model \
+  --final-step "${TARGET_STEPS}" \
+  --metrics "${OUTPUT}/metrics.jsonl" \
+  > "${OUTPUT}/model_retention.json"
+model_status=$?
+python "${R2R_ROOT}/experiments/r2r/check_toy_retention.py" \
+  --criterion joint \
+  --final-step "${TARGET_STEPS}" \
   --metrics "${OUTPUT}/metrics.jsonl" \
   > "${OUTPUT}/retention.json"
-touch "${OUTPUT}/ROBUST_SUCCESS"
+joint_status=$?
+set -e
+if [[ ${model_status} -eq 0 ]]; then
+  touch "${OUTPUT}/MODEL_ROBUST_SUCCESS"
+elif [[ ${model_status} -ne 3 ]]; then
+  exit ${model_status}
+fi
+if [[ ${joint_status} -eq 0 ]]; then
+  touch "${OUTPUT}/ROBUST_SUCCESS"
+elif [[ ${joint_status} -ne 3 ]]; then
+  exit ${joint_status}
+fi

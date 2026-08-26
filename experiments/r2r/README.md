@@ -221,20 +221,28 @@ the preceding factorial. Direct BPTT is cache-off; full R2R uses the dense BF16
 state/adjoint cache. Actor-plus-model retention determines whether learned
 termination removes the repeated-reward imagination exploit.
 
-Only after the distance-8 full-R2R arm retains exact actor and model accuracy
-over five consecutive evaluation panels and is still solved at 50k, launch the
-same selected profile at distances 16 and 32:
+The native-scale sparse-prior pair failed, the dynamics-scale-zero direct-BPTT
+oracle passed, and the `0.05` full-R2R arm subsequently retained exact actor
+and model accuracy through 60k. The matched direct-BPTT `0.05` arm remained at
+chance, while a second `0.005` full-R2R run independently retained the same
+solution by 50k. Promote the closer-to-native passing scale (`0.05`) to
+distances 16 and 32 with:
 
 ```bash
-R2R_SOURCE_CAMPAIGN=CAMPAIGN experiments/r2r/submit_toy_cont_distances.sh
+experiments/r2r/submit_toy_cont_distances.sh
 ```
 
-Both jobs remain `T=64`, `B=64`, seed 0, and run the full 50k interactions.
-The submission gate rejects a transient solve, and each distance writes
-`ROBUST_SUCCESS` only after five consecutive balanced 128-episode panels have
-actor accuracy 1.0, model reward-choice accuracy 1.0, and finite model margin
-of at least 0.1, with the exact gate still passing at 50k. No replay, cache,
-optimizer, or sampling setting changes.
+Both jobs remain `T=64`, `B=64`, seed 0, use the equal-class sparse-reward
+objective and dynamics scale `0.05`, and run 60k interactions. The submission
+gate rechecks the retained distance-8 source. It also creates a detached Git
+worktree at the exact submitted commit so queued array tasks cannot silently
+pick up later checkout edits. Each distance writes `ROBUST_SUCCESS` only after
+five consecutive balanced 128-episode panels have actor accuracy 1.0, model
+reward-choice accuracy 1.0, and finite model margin of at least 0.1, with the
+exact gate still passing at 60k. No replay, cache, optimizer, sampling,
+imagination, batch, or window setting changes. `R2R_TARGET_STEPS`,
+`R2R_DYN_SCALE`, and `R2R_SEED` are explicit overrides for continuations or
+replication campaigns.
 
 If the cached distance-8 world model solves but its actor remains at chance at
 50k, continue that exact checkpoint and objective without changing any
