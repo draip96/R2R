@@ -277,6 +277,21 @@ reconstruction stay disabled because the earlier acquisition factorial found
 that those gradients suppress the cue. The two 50k arms are direct BPTT and
 full BF16 state-adjoint R2R from the same reset-corrected commit.
 
+The native-scale pair at campaign `20260825T233154Z` completed all 50k steps,
+but even direct BPTT remained at chance. This rules out attributing that result
+to the cache and makes dynamics scale 0.5 the next acquisition confound to
+isolate. Run the bounded scale falsifier with:
+
+```bash
+experiments/r2r/submit_toy_sparse_dyn_falsifier.sh
+```
+
+It runs direct BPTT at dynamics scales 0 and 0.05 plus full R2R at 0.05. The
+zero-scale arm tests whether the three-class reward objective itself still
+acquires the cue; the matched 0.05 arms test the smallest native-mechanism
+repair in both direct and cached training. Model-only and joint five-panel
+retention reports are written separately.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:

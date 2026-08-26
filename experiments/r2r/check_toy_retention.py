@@ -14,6 +14,7 @@ def parse_args():
   parser.add_argument('--eval-every', type=int, default=1000)
   parser.add_argument('--final-step', type=int, default=50000)
   parser.add_argument('--min-model-margin', type=float, default=0.1)
+  parser.add_argument('--criterion', choices=('joint', 'model'), default='joint')
   return parser.parse_args()
 
 
@@ -32,17 +33,24 @@ def load_evaluations(path):
   return [evaluations[step] for step in sorted(evaluations)]
 
 
-def retained(evaluations, panels, eval_every, final_step, min_model_margin):
+def retained(
+    evaluations, panels, eval_every, final_step, min_model_margin,
+    criterion='joint'):
   if panels < 1:
     raise ValueError('--panels must be positive')
+  if criterion not in ('joint', 'model'):
+    raise ValueError(f'unknown retention criterion {criterion!r}')
 
   def solved(record):
     margin = float(record['toy_eval/model_reward_margin'])
-    return (
-        float(record['toy_eval/actor_accuracy']) == 1.0 and
+    model_solved = (
         float(record['toy_eval/model_reward_choice_accuracy']) == 1.0 and
         float(record.get('toy_eval/finite', 0.0)) == 1.0 and
         math.isfinite(margin) and margin >= min_model_margin)
+    return (
+        model_solved and
+        (criterion == 'model' or
+         float(record['toy_eval/actor_accuracy']) == 1.0))
 
   best = []
   current = []
@@ -70,9 +78,10 @@ def main():
   evaluations = load_evaluations(args.metrics)
   passed, selected, final = retained(
       evaluations, args.panels, args.eval_every, args.final_step,
-      args.min_model_margin)
+      args.min_model_margin, args.criterion)
   result = {
       'passed': passed,
+      'criterion': args.criterion,
       'required_panels': args.panels,
       'retained_streak': [{
           'step': int(record['step']),
