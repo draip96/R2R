@@ -31,10 +31,11 @@ if [[ ${SOURCE_RUN} != /* ]]; then
   SOURCE_RUN=${CANONICAL_ROOT}/${SOURCE_RUN}
 fi
 SOURCE_FINAL_STEP=${R2R_SOURCE_FINAL_STEP:-60000}
+SOURCE_DYN_SCALE=${R2R_SOURCE_DYN_SCALE:-0.05}
 SOURCE_VALIDATION=$(python experiments/r2r/validate_toy_r2r_run.py \
   --source "${SOURCE_RUN}" \
   --distance 8 --seed 0 --final-step "${SOURCE_FINAL_STEP}" \
-  --dyn-scale 0.05)
+  --dyn-scale "${SOURCE_DYN_SCALE}")
 printf '%s\n' "${SOURCE_VALIDATION}"
 SOURCE_SUMMARY_SHA256=$(sha256sum "${SOURCE_RUN}/toy_summary.json" | cut -d ' ' -f 1)
 SOURCE_CONFIG_SHA256=$(sha256sum "${SOURCE_RUN}/config.yaml" | cut -d ' ' -f 1)
@@ -62,6 +63,7 @@ printf '%s\n' \
   "dynamics_loss_scale=${DYN_SCALE}" \
   "source_distance8=${SOURCE_RUN}" \
   "source_final_step=${SOURCE_FINAL_STEP}" \
+  "source_dynamics_loss_scale=${SOURCE_DYN_SCALE}" \
   "source_training_commit=${SOURCE_TRAINING_COMMIT}" \
   "source_summary_sha256=${SOURCE_SUMMARY_SHA256}" \
   "source_config_sha256=${SOURCE_CONFIG_SHA256}" \
