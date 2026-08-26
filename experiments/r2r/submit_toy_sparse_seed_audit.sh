@@ -9,7 +9,9 @@ if [[ -n $(git status --porcelain --untracked-files=all) ]]; then
 fi
 
 LAUNCHER_COMMIT=$(git rev-parse HEAD)
-TRAINING_COMMIT=${R2R_TRAINING_COMMIT:-1b503a5fe3db27c2d8e59bd0695c46d9baf71e5d}
+TRAINING_COMMIT=${R2R_TRAINING_COMMIT:-421666eaba5fb8cdb2bee96f83587e332375c4d8}
+DYN_SCALE=${R2R_DYN_SCALE:-0.005}
+TARGET_STEPS=${R2R_TARGET_STEPS:-60000}
 if ! git cat-file -e "${TRAINING_COMMIT}^{commit}"; then
   echo "unknown training commit ${TRAINING_COMMIT}" >&2
   exit 2
@@ -30,8 +32,9 @@ else
   git worktree add --detach "${SNAPSHOT_ROOT}" "${TRAINING_COMMIT}"
 fi
 
-SEED0_CAMPAIGN=${R2R_SEED0_CAMPAIGN:-20260826T160354Z}
-DISTANCE8_SOURCE=${R2R_DISTANCE8_SOURCE:-experiments/r2r/results/toy_sparse_dyn_falsifier/20260826T013224Z/full_r2r_dyn005}
+SEED0_CAMPAIGN=${R2R_SEED0_CAMPAIGN:-20260826T164136Z}
+DISTANCE8_SOURCE=${R2R_DISTANCE8_SOURCE:-experiments/r2r/results/toy_sparse_dyn_promotion/20260826T015754Z/dyn0p005_full_r2r}
+DISTANCE8_FINAL_STEP=${R2R_DISTANCE8_FINAL_STEP:-50000}
 if [[ ${DISTANCE8_SOURCE} != /* ]]; then
   DISTANCE8_SOURCE=${CANONICAL_ROOT}/${DISTANCE8_SOURCE}
 fi
@@ -41,19 +44,21 @@ mkdir -p "${OUTPUT}/seed0_gate"
 
 python experiments/r2r/validate_toy_r2r_run.py \
   --source "${DISTANCE8_SOURCE}" \
-  --distance 8 --seed 0 --final-step 60000 --dyn-scale 0.05 \
+  --distance 8 --seed 0 --final-step "${DISTANCE8_FINAL_STEP}" \
+  --dyn-scale "${DYN_SCALE}" \
   > "${OUTPUT}/seed0_gate/distance8.json"
 for distance in 16 32; do
   source_run=${CANONICAL_ROOT}/experiments/r2r/results/toy_sparse_dyn_distances/${SEED0_CAMPAIGN}/distance${distance}_seed0
   python experiments/r2r/validate_toy_r2r_run.py \
     --source "${source_run}" \
-    --distance "${distance}" --seed 0 --final-step 60000 --dyn-scale 0.05 \
+    --distance "${distance}" --seed 0 --final-step "${TARGET_STEPS}" \
+    --dyn-scale "${DYN_SCALE}" \
     --expected-commit "${TRAINING_COMMIT}" \
     > "${OUTPUT}/seed0_gate/distance${distance}.json"
 done
 
 job=$(sbatch --parsable --array=0-5 \
-  --export=ALL,R2R_CAMPAIGN="${CAMPAIGN}",R2R_TARGET_STEPS=60000,R2R_DYN_SCALE=0.05,R2R_DISTANCES=8:16:32,R2R_SEEDS=1:2,R2R_RESULT_SERIES=toy_sparse_dyn_seed_audit,R2R_SOURCE_ROOT="${SNAPSHOT_ROOT}",R2R_EXPECTED_COMMIT="${TRAINING_COMMIT}" \
+  --export=ALL,R2R_CAMPAIGN="${CAMPAIGN}",R2R_TARGET_STEPS="${TARGET_STEPS}",R2R_DYN_SCALE="${DYN_SCALE}",R2R_DISTANCES=8:16:32,R2R_SEEDS=1:2,R2R_RESULT_SERIES=toy_sparse_dyn_seed_audit,R2R_SOURCE_ROOT="${SNAPSHOT_ROOT}",R2R_EXPECTED_COMMIT="${TRAINING_COMMIT}" \
   experiments/r2r/slurm_toy_cont_distances.sh)
 printf '%s\n' "${job}" > "${OUTPUT}/job-array.txt"
 printf '%s\n' \
@@ -61,12 +66,14 @@ printf '%s\n' \
   "job=${job}" \
   "distances=8,16,32" \
   "seeds=1,2" \
-  "target_steps=60000" \
-  "dynamics_loss_scale=0.05" \
+  "target_steps=${TARGET_STEPS}" \
+  "dynamics_loss_scale=${DYN_SCALE}" \
+  "distance8_source=${DISTANCE8_SOURCE}" \
+  "distance8_final_step=${DISTANCE8_FINAL_STEP}" \
   "seed0_campaign=${SEED0_CAMPAIGN}" \
   "launcher_commit=${LAUNCHER_COMMIT}" \
   "training_commit=${TRAINING_COMMIT}" \
   "source_snapshot=${SNAPSHOT_ROOT}" \
   > "${OUTPUT}/submission.txt"
-printf 'campaign=%s job=%s distances=8,16,32 seeds=1,2 training_commit=%s\n' \
-  "${CAMPAIGN}" "${job}" "${TRAINING_COMMIT}"
+printf 'campaign=%s job=%s distances=8,16,32 seeds=1,2 dyn=%s training_commit=%s\n' \
+  "${CAMPAIGN}" "${job}" "${DYN_SCALE}" "${TRAINING_COMMIT}"
