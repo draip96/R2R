@@ -244,6 +244,19 @@ imagination, batch, or window setting changes. `R2R_TARGET_STEPS`,
 `R2R_DYN_SCALE`, and `R2R_SEED` are explicit overrides for continuations or
 replication campaigns.
 
+After all three seed-0 runs pass that retained gate, launch the exact same
+60k profile for seeds 1 and 2 at distances 8, 16, and 32:
+
+```bash
+experiments/r2r/submit_toy_sparse_seed_audit.sh
+```
+
+The submission validates every seed-0 summary, config, clean provenance, and
+final retention streak before allocating GPUs. The six replication cells run
+from the immutable `1b503a5` training snapshot even if later commits add
+launch or analysis tooling. Override `R2R_SEED0_CAMPAIGN` only when promoting a
+different completed distance-16/32 campaign.
+
 If the cached distance-8 world model solves but its actor remains at chance at
 50k, continue that exact checkpoint and objective without changing any
 hyperparameter:

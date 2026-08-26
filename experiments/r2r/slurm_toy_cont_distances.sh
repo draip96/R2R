@@ -20,9 +20,9 @@ R2R_EXPECTED_COMMIT=${R2R_EXPECTED_COMMIT:?R2R_EXPECTED_COMMIT is required}
 R2R_IMAGE=${R2R_IMAGE:-${CANONICAL_ROOT}/.containers/r2i.sif}
 RESULT_ROOT=${R2R_RESULT_ROOT:-${CANONICAL_ROOT}/experiments/r2r/results}
 CAMPAIGN=${R2R_CAMPAIGN:?R2R_CAMPAIGN is required}
-SEED=${R2R_SEED:-0}
 TARGET_STEPS=${R2R_TARGET_STEPS:-60000}
 DYN_SCALE=${R2R_DYN_SCALE:-0.05}
+RESULT_SERIES=${R2R_RESULT_SERIES:-toy_sparse_dyn_distances}
 
 actual_commit=$(git -C "${R2R_ROOT}" rev-parse HEAD)
 if [[ ${actual_commit} != "${R2R_EXPECTED_COMMIT}" ]]; then
@@ -46,17 +46,35 @@ if not math.isfinite(value) or not 0.0 < value <= 0.05:
   raise SystemExit('R2R_DYN_SCALE must be finite and in (0, 0.05]')
 PY
 
-case "${SLURM_ARRAY_TASK_ID}" in
-  0) DISTANCE=16 ;;
-  1) DISTANCE=32 ;;
-  *)
-    echo "array index must be 0 or 1" >&2
-    exit 2
-    ;;
-esac
+IFS=: read -r -a DISTANCES <<< "${R2R_DISTANCES:-16:32}"
+IFS=: read -r -a SEEDS <<< "${R2R_SEEDS:-${R2R_SEED:-0}}"
+if (( ${#DISTANCES[@]} == 0 || ${#SEEDS[@]} == 0 )); then
+  echo "distance and seed sets must not be empty" >&2
+  exit 2
+fi
+index=${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID is required}
+total=$(( ${#DISTANCES[@]} * ${#SEEDS[@]} ))
+if (( index < 0 || index >= total )); then
+  echo "array index ${index} is outside the ${total}-cell grid" >&2
+  exit 2
+fi
+DISTANCE=${DISTANCES[$(( index % ${#DISTANCES[@]} ))]}
+SEED=${SEEDS[$(( index / ${#DISTANCES[@]} ))]}
+if [[ ! ${DISTANCE} =~ ^(8|16|32)$ ]]; then
+  echo "distance must be 8, 16, or 32" >&2
+  exit 2
+fi
+if [[ ! ${SEED} =~ ^[0-9]+$ ]]; then
+  echo "seed must be a nonnegative integer" >&2
+  exit 2
+fi
+if [[ ! ${RESULT_SERIES} =~ ^[a-z0-9_]+$ ]]; then
+  echo "R2R_RESULT_SERIES contains invalid characters" >&2
+  exit 2
+fi
 
 DYN_TAG=${DYN_SCALE//./p}
-OUTPUT=${RESULT_ROOT}/toy_sparse_dyn_distances/${CAMPAIGN}/distance${DISTANCE}_seed${SEED}
+OUTPUT=${RESULT_ROOT}/${RESULT_SERIES}/${CAMPAIGN}/distance${DISTANCE}_seed${SEED}
 REPLAY_DIRECTORY=${SLURM_TMPDIR:?}/r2r-sparse-distance-${CAMPAIGN}-${DISTANCE}-${SEED}
 mkdir -p "${OUTPUT}/provenance" "${OUTPUT}/lfs"
 env R2R_ROOT="${R2R_ROOT}" "${R2R_ROOT}/experiments/r2r/record_provenance.sh" \
@@ -64,6 +82,7 @@ env R2R_ROOT="${R2R_ROOT}" "${R2R_ROOT}/experiments/r2r/record_provenance.sh" \
 printf '%s\n' \
   "distance=${DISTANCE}" \
   "seed=${SEED}" \
+  "result_series=${RESULT_SERIES}" \
   "target_steps=${TARGET_STEPS}" \
   "dynamics_loss_scale=${DYN_SCALE}" \
   "source_root=${R2R_ROOT}" \
