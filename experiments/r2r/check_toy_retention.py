@@ -55,9 +55,12 @@ def retained(
   best = []
   current = []
   for record in evaluations:
-    if (solved(record) and
-        (not current or
-         int(record['step']) - int(current[-1]['step']) == eval_every)):
+    step = int(record['step'])
+    gap = None if not current else step - int(current[-1]['step'])
+    contiguous = (
+        not current or gap == eval_every or
+        (step == final_step and 0 < gap <= eval_every))
+    if solved(record) and contiguous:
       current.append(record)
     elif solved(record):
       current = [record]

@@ -20,7 +20,8 @@ class ToyRetentionTest(unittest.TestCase):
 
   def test_model_criterion_does_not_require_actor_solution(self):
     evaluations = [
-        _record(step, 0.5, 1.0) for step in range(46000, 50001, 1000)]
+        _record(step, 0.5, 1.0)
+        for step in (46096, 47096, 48096, 49096, 50000)]
     passed, selected, final = retained(
         evaluations, 5, 1000, 50000, 0.1, criterion='model')
     self.assertTrue(passed)
