@@ -292,6 +292,18 @@ acquires the cue; the matched 0.05 arms test the smallest native-mechanism
 repair in both direct and cached training. Model-only and joint five-panel
 retention reports are written separately.
 
+If the zero-scale oracle acquires but 0.05 blocks the matched direct control,
+run the next tenfold scale reduction with:
+
+```bash
+R2R_DYN_SCALE=0.005 experiments/r2r/submit_toy_sparse_dyn_promotion.sh
+```
+
+This keeps the same dynamics KL mechanism. Adam's per-parameter moments largely
+preserve learning in parameters used only by the stochastic prior, while the
+KL contribution to shared recurrent parameters is reduced tenfold relative to
+the proven reward objective.
+
 ## Gated downstream campaign
 
 After both ToyMemory markers exist, submit the seed-0 BSuite grid:
