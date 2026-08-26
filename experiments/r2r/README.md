@@ -277,10 +277,13 @@ The continuation also logs scalar summaries of imagined continuation and
 trajectory weights; these are read-only diagnostics for detecting returns that
 continue past the learned terminal transition.
 
-For a phase-conditioned snapshot from a saved distance-8 checkpoint, run
-`probe_toy_imagination.py` on a Slurm GPU allocation. It reports actor actions,
-one-step reward and continuation, critic returns, and imagination weights for
-each real episode phase without updating the checkpoint.
+For a phase-conditioned snapshot from any saved ToyMemory checkpoint, run
+`probe_toy_imagination.py` on a Slurm GPU allocation. It loads the checkpoint's
+exact adjacent `config.yaml` and reports actor actions, one-step reward and
+continuation, critic returns, and imagination weights for each real episode
+phase without updating the checkpoint. The default eight stochastic draws per
+state expose sampled-prior failures that a deterministic reward-choice metric
+can hide.
 
 If that probe shows unconstrained nonterminal rewards and an untrained sampled
 prior, run the matched sparse-prior repair:
